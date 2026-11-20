@@ -1,0 +1,21 @@
+import api from './api';
+const groupService = {
+  createGroup: (data) => api.post('/groups', data),
+  joinGroup: (groupCode) => api.post('/groups/join', { groupCode }),
+  getGroupDetails: (id) => api.get(`/groups/${id}`),
+  lockGroup: (id) => api.post(`/groups/${id}/lock`),
+  leaveGroup: (id) => api.post(`/groups/${id}/leave`),
+  removeMember: (id, userId) => api.delete(`/groups/${id}/members/${userId}`),
+  addItem: (id, item) => api.post(`/groups/${id}/items`, item),
+  updateItem: (id, itemId, item) => api.patch(`/groups/${id}/items/${itemId}`, item),
+  configureItemShares: (id, itemId, userIds) => api.put(`/groups/${id}/items/${itemId}/shares`, { userIds }),
+  acceptItemShare: (id, itemId) => api.post(`/groups/${id}/items/${itemId}/accept`),
+  removeItem: (id, itemId) => api.delete(`/groups/${id}/items/${itemId}`),
+  previewCheckout: (id, data) => api.post(`/groups/${id}/quote`, data),
+  checkout: (id, data) => api.post(`/groups/${id}/checkout`, data),
+  getContributionInstructions: (id, contributionId) => api.get(`/groups/${id}/contributions/${contributionId}/upi`),
+  submitContributionReference: (id, contributionId, transactionReference) => api.post(`/groups/${id}/contributions/${contributionId}/upi-reference`, { transactionReference }),
+  getPendingContributions: () => api.get('/groups/admin/contributions/pending'),
+  reviewContribution: (id, contributionId, action, reason) => api.post(`/groups/${id}/contributions/${contributionId}/review`, { action, reason }),
+};
+export default groupService;

@@ -1,0 +1,55 @@
+{
+  "name": "wrapchik-backend",
+  "version": "1.0.0",
+  "description": "Wrapchik - Full Stack Campus Food Ordering & Shop Management Backend API",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/scripts/devServer.js",
+    "db:check": "node src/scripts/checkDb.js",
+    "db:query-indexes": "node src/scripts/ensureQueryIndexes.js",
+    "db:loyalty-indexes": "node src/scripts/ensureLoyaltyIndexes.js",
+    "db:audit-menu": "node src/scripts/auditMenu.js --dry-run",
+    "db:import-menu": "node src/scripts/importScreenshotMenu.js",
+    "db:backup": "node src/scripts/backupDatabase.js",
+    "db:restore": "node src/scripts/restoreDatabase.js",
+    "admin:recover": "node src/scripts/recoverAdmin.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "express",
+    "mongodb",
+    "food-ordering",
+    "razorpay",
+    "react-native",
+    "campus-app"
+  ],
+  "author": "Wrapchik Dev Team",
+  "license": "ISC",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.0.1",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.7.0",
+    "express-validator": "^7.0.1",
+    "google-auth-library": "^10.9.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.2.0",
+    "nodemailer": "^10.5.0",
+    "razorpay": "^2.9.8",
+    "resend": "^6.37.0",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "overrides": {
+    "nodemon": {
+      "minimatch": "11.0.1"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+name: Wrapchik checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Backend clean install and tests
+        working-directory: backend
+        run: npm ci && npm test
+      - name: Frontend clean install and tests
+        working-directory: frontend
+        run: npm ci && node --test && npm run check:routes
+      - name: Validate Expo dependency compatibility
+        working-directory: frontend
+        run: npx expo install --check
+      - name: Export web bundle
+        working-directory: frontend
+        run: npx expo export --platform web
+      - name: Export Android JavaScript bundle
+        working-directory: frontend
+        run: npx expo export --platform android

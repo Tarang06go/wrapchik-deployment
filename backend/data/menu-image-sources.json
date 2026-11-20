@@ -1,0 +1,115 @@
+{
+  "coffeeLatte": {
+    "photoId": "photo-1461023058943-07fcbe16d735",
+    "label": "Cold latte in a glass cup",
+    "photographer": "Demi DeHerrera",
+    "sourcePage": "https://unsplash.com/photos/glass-cup-filled-with-ice-latte-on-tabletop-L-sm1B4L1Ns",
+    "license": "Unsplash License"
+  },
+  "icedCoffee": {
+    "photoId": "photo-1764298490445-6add12301888",
+    "label": "Iced coffee with milk and ice",
+    "photographer": "Winston Chen",
+    "sourcePage": "https://unsplash.com/photos/iced-coffee-with-milk-and-ice-in-a-glass-nIZl9PuwMXk",
+    "license": "Unsplash License"
+  },
+  "chickenBurger": {
+    "photoId": "photo-1761515397046-44035db91504",
+    "label": "Crispy chicken burger with fries",
+    "photographer": "Allen Y",
+    "sourcePage": "https://unsplash.com/photos/a-crispy-chicken-burger-with-french-fries-Omyk3J_LPfk",
+    "license": "Unsplash License"
+  },
+  "chickenBurgerAlt": {
+    "photoId": "photo-1778449690398-25637cfdb822",
+    "label": "Chicken burger with lettuce and cucumber",
+    "photographer": "Shoeib Abolhassani",
+    "sourcePage": "https://unsplash.com/photos/a-delicious-chicken-burger-with-lettuce-and-cucumber-S9CjBUhWZus",
+    "license": "Unsplash License"
+  },
+  "vegBurger": {
+    "photoId": "photo-1625683279315-8222ae8af27a",
+    "label": "Veggie burger with fries",
+    "photographer": "Israel Albornoz",
+    "sourcePage": "https://unsplash.com/photos/burger-and-fries-on-brown-wooden-round-plate-Le25t7xIoaE",
+    "license": "Unsplash License"
+  },
+  "chickenWrap": {
+    "photoId": "photo-1632660346941-023cc64e1252",
+    "label": "Chicken wrap on a plate",
+    "photographer": "Advocator SY",
+    "sourcePage": "https://unsplash.com/photos/a-black-plate-topped-with-a-burrito-and-a-salad-MdkUEKFfkTM",
+    "license": "Unsplash License"
+  },
+  "vegWrap": {
+    "photoId": "photo-1565299585323-38d6b0865b47",
+    "label": "Existing Wrapchik vegetable-wrap image asset",
+    "photographer": "Existing project asset",
+    "sourcePage": "https://images.unsplash.com/photo-1565299585323-38d6b0865b47",
+    "license": "Existing project asset; original Unsplash photo page not recorded",
+    "existingAsset": true
+  },
+  "vegSalad": {
+    "photoId": "photo-1747292718361-c838a9968ec7",
+    "label": "Colorful vegetable salad bowl",
+    "photographer": "Elena Leya",
+    "sourcePage": "https://unsplash.com/photos/a-colorful-salad-bowl-with-many-fresh-ingredients-_vy3L5n8VnI",
+    "license": "Unsplash License"
+  },
+  "chickenSalad": {
+    "photoId": "photo-1761315600943-d8a5bb0c499f",
+    "label": "Grilled chicken salad with avocado and tomatoes",
+    "photographer": "Ani Augustine",
+    "sourcePage": "https://unsplash.com/photos/grilled-chicken-salad-with-avocado-and-tomatoes-9TogNg01qzI",
+    "license": "Unsplash License"
+  },
+  "vadaPav": {
+    "photoId": "photo-1750767397012-3413ba4fdbc7",
+    "label": "Vada pav, a popular Indian street food",
+    "photographer": "Zoshua Colah",
+    "sourcePage": "https://unsplash.com/photos/vada-pav-a-popular-indian-street-food-nNIHe72pa60",
+    "license": "Unsplash License"
+  },
+  "fries": {
+    "photoId": "photo-1768215610440-fcb9631c7ee2",
+    "label": "Golden french fries",
+    "photographer": "Cindy Bartillon",
+    "sourcePage": "https://unsplash.com/photos/a-pile-of-golden-french-fries-on-a-white-plate--doMDpFipzQ",
+    "license": "Unsplash License"
+  },
+  "truffleFries": {
+    "photoId": "photo-1534938665420-4193effeacc4",
+    "label": "French fries in a fry basket; described by its photographer as Perigord truffle chips",
+    "photographer": "Vera Cho",
+    "sourcePage": "https://unsplash.com/photos/french-fries-in-fry-basket-lv7H9OKj_f4",
+    "license": "Unsplash License"
+  },
+  "onionRings": {
+    "photoId": "photo-1645066804048-080d5fe87ae3",
+    "label": "Onion rings with dipping sauce",
+    "photographer": "Satria Setiawan",
+    "sourcePage": "https://unsplash.com/photos/a-white-plate-topped-with-onion-rings-next-to-a-bowl-of-dipping-sauce-hhq8Z76ODrU",
+    "license": "Unsplash License"
+  },
+  "chickenSnacks": {
+    "photoId": "photo-1768204039907-77a974159ef0",
+    "label": "Chicken tenders, fries, and popcorn chicken",
+    "photographer": "Lee Milo",
+    "sourcePage": "https://unsplash.com/photos/basket-of-fried-chicken-tenders-fries-and-popcorn-chicken-bG8sQGD8Bi8",
+    "license": "Unsplash License"
+  },
+  "chickenNuggets": {
+    "photoId": "photo-1657271511865-f610b280dca4",
+    "label": "Fried chicken and nuggets",
+    "photographer": "Proper Quality Shandis",
+    "sourcePage": "https://unsplash.com/photos/a-plate-of-fried-chicken-zE8wKvGPcDg",
+    "license": "Unsplash License"
+  },
+  "nachos": {
+    "photoId": "photo-1570466199120-80bba1eabad7",
+    "label": "Nachos on an oval tray",
+    "photographer": "Erick Su",
+    "sourcePage": "https://unsplash.com/photos/nachos-on-oval-tray-WjBp05j8LXI",
+    "license": "Unsplash License"
+  }
+}

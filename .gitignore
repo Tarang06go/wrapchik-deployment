@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+.expo/
+android/
+ios/
+dist/
+web-build/
+coverage/
+/PROGRESS.md
+/backend/backups/
+*.zip
+.freebuff/

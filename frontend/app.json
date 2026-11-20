@@ -1,0 +1,76 @@
+{
+  "expo": {
+    "name": "Wrapchik",
+    "slug": "wrapchik",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.wrapchik.app"
+    },
+    "android": {
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "package": "com.wrapchik.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#FFF8F3"
+        }
+      ],
+      "expo-dev-client",
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#FF5722",
+          "defaultChannel": "orders"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Wrapchik uses the camera to scan one-time pickup QR codes for paid orders.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "scheme": "wrapchik",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4a057aed-99c4-439e-bd49-b465197abaf7"
+      }
+    }
+  }
+}
