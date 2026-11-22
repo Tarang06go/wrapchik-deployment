@@ -45,7 +45,7 @@ test('Gmail SMTP credentials take precedence over a Resend test sender for stude
     const service = createEmailOtpService({
       Challenge,
       getEnv: () => ({
-        NODE_ENV: 'production', LOCAL_OTP_ENABLED: 'false',
+        NODE_ENV: 'development', LOCAL_OTP_ENABLED: 'false',
         SMTP_USER: 'wrapchik.sender@gmail.com', SMTP_APP_PASSWORD: 'gmail-app-password',
         RESEND_API_KEY: 'legacy-resend-key', EMAIL_FROM: 'Wrapchik <onboarding@resend.dev>',
         JWT_SECRET: 'a-long-test-secret-that-is-more-than-32-characters',

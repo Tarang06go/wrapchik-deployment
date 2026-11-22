@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { createEmailOtpService, normalizeEmail, isValidEmail, isThaparEmail } = require('../services/emailOtpService');
+const { getEmailDeliveryProvider } = require('../utils/emailProviderConfig');
 
 const OTP_TTL_SECONDS = 10 * 60;
 const OTP_RESEND_SECONDS = 60;
@@ -36,13 +37,12 @@ const findUsersByPhone = (phone) =>
 const isValidPhone = (phone) => /^\+[1-9]\d{7,14}$/.test(phone);
 const isAccountVerified = (user) => Boolean(user?.emailVerified || user?.phoneVerified);
 const isEmailOtpConfigured = () => Boolean(
-  (process.env.SMTP_USER && process.env.SMTP_APP_PASSWORD)
-  || (process.env.RESEND_API_KEY && process.env.EMAIL_FROM && !/@resend\.dev\s*>?$/i.test(process.env.EMAIL_FROM))
-)
-  || (process.env.NODE_ENV === 'development' && process.env.LOCAL_OTP_ENABLED === 'true');
+  getEmailDeliveryProvider(process.env)
+  || (process.env.NODE_ENV === 'development' && process.env.LOCAL_OTP_ENABLED === 'true')
+);
 const otpUnavailable = (res) => res.status(503).json({
   success: false,
-  message: 'Student email delivery is not configured. Set Gmail SMTP credentials in the backend and restart the service.',
+  message: 'Email verification is temporarily unavailable. Please try again later.',
 });
 const isStrongPassword = (password) =>
   typeof password === 'string' && /^(?=.*[A-Za-z])(?=.*\d).{8,128}$/.test(password);

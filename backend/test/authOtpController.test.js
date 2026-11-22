@@ -147,11 +147,21 @@ test('missing email provider configuration returns the same response before acco
     NODE_ENV: process.env.NODE_ENV,
     LOCAL_OTP_ENABLED: process.env.LOCAL_OTP_ENABLED,
     RESEND_API_KEY: process.env.RESEND_API_KEY,
+    EMAIL_FROM: process.env.EMAIL_FROM,
+    BREVO_API_KEY: process.env.BREVO_API_KEY,
+    BREVO_EMAIL_FROM: process.env.BREVO_EMAIL_FROM,
+    SMTP_USER: process.env.SMTP_USER,
+    SMTP_APP_PASSWORD: process.env.SMTP_APP_PASSWORD,
   };
   let lookups = 0;
   process.env.NODE_ENV = 'production';
   process.env.LOCAL_OTP_ENABLED = 'false';
   delete process.env.RESEND_API_KEY;
+  delete process.env.EMAIL_FROM;
+  delete process.env.BREVO_API_KEY;
+  delete process.env.BREVO_EMAIL_FROM;
+  delete process.env.SMTP_USER;
+  delete process.env.SMTP_APP_PASSWORD;
   User.findOne = () => { lookups += 1; return makeQuery(null); };
   try {
     const unknown = response();
@@ -160,6 +170,7 @@ test('missing email provider configuration returns the same response before acco
     await sendOtp({ body: { email: 'known@example.com' } }, known, (error) => { throw error; });
     assert.equal(unknown.statusCode, 503);
     assert.equal(known.statusCode, 503);
+    assert.equal(unknown.body.message, 'Email verification is temporarily unavailable. Please try again later.');
     assert.equal(unknown.body.message, known.body.message);
     assert.equal(lookups, 0);
   } finally {

@@ -320,6 +320,42 @@ test('student signup will not send with Resend test sender or create a challenge
     email: 'student@thapar.edu',
     purpose: 'SIGNUP',
     pendingRegistration: { name: 'Student', phone: '+911234567890', passwordHash: 'bcrypt-hash' },
-  }), (error) => error.statusCode === 503 && /verified in Resend/.test(error.message));
+  }), (error) => error.statusCode === 503 && /temporarily unavailable/.test(error.message));
   assert.equal(FakeChallenge.rows.length, 0);
+});
+
+test('configured Brevo HTTPS sender delivers an OTP challenge without creating the account', async () => {
+  resetFake();
+  const originalFetch = global.fetch;
+  let payload;
+  global.fetch = async (url, options) => {
+    assert.equal(url, 'https://api.brevo.com/v3/smtp/email');
+    payload = JSON.parse(options.body);
+    return { ok: true, status: 201, json: async () => ({ messageId: 'brevo-test-id' }) };
+  };
+  try {
+    const service = createEmailOtpService({
+      Challenge: FakeChallenge,
+      getEnv: () => ({
+        NODE_ENV: 'production',
+        BREVO_API_KEY: 'test-key',
+        BREVO_EMAIL_FROM: 'sender@gmail.com',
+        JWT_SECRET: 'test-secret-that-is-at-least-32-characters-long',
+      }),
+      randomInt: () => 345678,
+      randomUUID: () => 'brevo-signup-nonce',
+    });
+    const result = await service.requestCode({
+      email: 'student@thapar.edu',
+      purpose: 'SIGNUP',
+      pendingRegistration: { name: 'Student', phone: '+911234567890', passwordHash: 'bcrypt-hash' },
+    });
+    assert.equal(result.provider, 'brevo');
+    assert.equal(FakeChallenge.rows[0].state, 'SENT');
+    assert.equal(FakeChallenge.rows[0].providerMessageId, 'brevo-test-id');
+    assert.equal(payload.to[0].email, 'student@thapar.edu');
+    assert.equal(FakeChallenge.rows[0].userId, undefined);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

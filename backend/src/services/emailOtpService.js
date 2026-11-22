@@ -2,6 +2,8 @@ const crypto = require('crypto');
 const EmailOtpChallenge = require('../models/EmailOtpChallenge');
 const { createResendEmailService } = require('./resendEmailService');
 const { createGmailSmtpEmailService } = require('./gmailSmtpEmailService');
+const { createBrevoEmailService } = require('./brevoEmailService');
+const { getEmailDeliveryProvider } = require('../utils/emailProviderConfig');
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
@@ -46,6 +48,7 @@ const createEmailOtpService = ({
 } = {}) => {
   const resendEmailService = createResendEmailService({ getEnv });
   const gmailSmtpEmailService = createGmailSmtpEmailService({ getEnv });
+  const brevoEmailService = createBrevoEmailService({ getEnv });
   const requestCode = async ({ email: rawEmail, userId, purpose, pendingRegistration }) => {
     const email = normalizeEmail(rawEmail);
     if (!isValidEmail(email)) throw createOtpError('Enter a valid email address.', 400);
@@ -63,18 +66,17 @@ const createEmailOtpService = ({
 
     const env = getEnv();
     const localMode = env.NODE_ENV === 'development' && env.LOCAL_OTP_ENABLED === 'true';
-    const smtpConfigured = Boolean(env.SMTP_USER && env.SMTP_APP_PASSWORD);
-    const resendTestSender = /@resend\.dev\s*>?$/i.test(env.EMAIL_FROM || '');
-    const resendConfigured = Boolean(env.RESEND_API_KEY && env.EMAIL_FROM && !resendTestSender);
-    if (!localMode && !emailService && !smtpConfigured && !resendConfigured) {
-      console.warn('[Auth OTP] Email provider not invoked', { purpose, reason: 'missing_smtp_or_verified_resend' });
-      if (env.RESEND_API_KEY && resendTestSender) {
-        throw createOtpError('The Resend sender must be verified in Resend. Verify your sending domain and set EMAIL_FROM to an address on it, or set SMTP_USER and SMTP_APP_PASSWORD.', 503);
-      }
-      throw createOtpError('Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD in backend/.env, then restart the backend.', 503);
+    const configuredProvider = getEmailDeliveryProvider(env);
+    if (!localMode && !emailService && !configuredProvider) {
+      console.warn('[Auth OTP] Email provider not invoked', { purpose, reason: 'no_supported_provider_configured' });
+      throw createOtpError('Email verification is temporarily unavailable. Please try again later.', 503);
     }
-    const provider = smtpConfigured ? 'gmail' : 'resend';
-    const selectedEmailService = emailService || (provider === 'gmail' ? gmailSmtpEmailService : resendEmailService);
+    const provider = localMode ? 'local' : (configuredProvider || 'custom');
+    const selectedEmailService = emailService || ({
+      gmail: gmailSmtpEmailService,
+      brevo: brevoEmailService,
+      resend: resendEmailService,
+    }[provider]);
 
     await Challenge.init();
     const timestamp = now();
@@ -152,12 +154,7 @@ const createEmailOtpService = ({
         { _id: challenge._id, challengeNonce, state: 'SENDING', consumed: false },
         { $set: { state: 'FAILED', consumed: true, resendAt: new Date(now()) }, $unset: unset }
       );
-      const message = error.statusCode === 503
-        ? error.message
-        : provider === 'gmail'
-          ? 'The verification email could not be sent through Gmail. Check the Gmail app password and server network access, then try again.'
-          : 'The verification email could not be sent through Resend. Check the sender configuration and try again.';
-      throw createOtpError(message, error.statusCode || 502);
+      throw createOtpError('We could not deliver the verification email right now. Please try again later.', error.statusCode || 502);
     }
 
     return { provider, expiresInSeconds: OTP_TTL_MS / 1000, resendAfterSeconds: OTP_RESEND_COOLDOWN_MS / 1000 };

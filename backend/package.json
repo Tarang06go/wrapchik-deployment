@@ -15,6 +15,7 @@
     "db:backup": "node src/scripts/backupDatabase.js",
     "db:restore": "node src/scripts/restoreDatabase.js",
     "admin:recover": "node src/scripts/recoverAdmin.js",
+    "admin:bootstrap": "node src/scripts/bootstrapInitialAdmin.js",
     "test": "node --test"
   },
   "keywords": [
