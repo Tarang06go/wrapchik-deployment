@@ -6,7 +6,7 @@ const { getEmailDeliveryProvider } = require('../src/utils/emailProviderConfig')
 test('Brevo sends branded OTPs through the transactional HTTPS API', async () => {
   let request;
   const service = createBrevoEmailService({
-    getEnv: () => ({ BREVO_API_KEY: 'test-api-key', BREVO_EMAIL_FROM: 'wrapchik.admin@gmail.com' }),
+    getEnv: () => ({ BREVO_API_KEY: '  test-api-key\n', BREVO_EMAIL_FROM: ' wrapchik.admin@gmail.com ' }),
     fetchImpl: async (...args) => {
       request = args;
       return { ok: true, status: 201, json: async () => ({ messageId: 'brevo-message-id' }) };
@@ -32,7 +32,14 @@ test('Brevo delivery errors are generic and logs do not include recipient, API k
   try {
     const service = createBrevoEmailService({
       getEnv: () => ({ BREVO_API_KEY: 'private-api-key', BREVO_EMAIL_FROM: 'sender@gmail.com' }),
-      fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({ message: 'secret provider body' }) }),
+      fetchImpl: async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          code: 'unauthorized',
+          message: 'Invalid api-key=private-api-key for student@thapar.edu; xkeysib-LeakedCredential OTP 123456 phone +1 555 123 4567',
+        }),
+      }),
     });
     await assert.rejects(service.sendOtpEmail({ to: 'student@thapar.edu', code: '123456', purpose: 'SIGNUP' }), (error) => {
       assert.equal(error.statusCode, 502);
@@ -43,7 +50,9 @@ test('Brevo delivery errors are generic and logs do not include recipient, API k
     console.warn = originalWarn;
   }
   assert.match(logs, /status["']?:?\s*401/);
-  assert.doesNotMatch(logs, /student@thapar\.edu|private-api-key|123456|secret provider body/);
+  assert.match(logs, /unauthorized/);
+  assert.match(logs, /redacted email/);
+  assert.doesNotMatch(logs, /student@thapar\.edu|private-api-key|xkeysib-LeakedCredential|123456|555 123 4567/);
 });
 
 test('email provider selection shares one gate and does not use SMTP in production', () => {
@@ -53,3 +62,4 @@ test('email provider selection shares one gate and does not use SMTP in producti
   assert.equal(getEmailDeliveryProvider({ NODE_ENV: 'production', RESEND_API_KEY: 'key', EMAIL_FROM: 'Wrapchik <onboarding@resend.dev>' }), null);
   assert.equal(getEmailDeliveryProvider({ NODE_ENV: 'production', RESEND_API_KEY: 'key', EMAIL_FROM: 'Wrapchik <auth@verified.example>' }), 'resend');
 });
+

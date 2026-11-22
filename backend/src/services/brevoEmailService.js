@@ -12,10 +12,33 @@ const escapeHtml = (value) => String(value)
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
 
+const sanitizeProviderMessage = (value) => String(value || '')
+  .replace(/[\r\n\t]+/g, ' ')
+  .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted email]')
+  .replace(/\b(?:xkeysib|xkeyscustom|xkeyssmtp)[A-Z0-9_-]*/gi, '[redacted key]')
+  .replace(/\b(?:api[-_ ]?key|authorization|token|password|secret)\b\s*[:=]\s*[^,;\s]+/gi, '[redacted credential]')
+  .replace(/\b\d{6}\b/g, '[redacted code]')
+  .replace(/\+?\d[\d\s().-]{8,}\d/g, '[redacted number]')
+  .replace(/https?:\/\/\S+/gi, '[redacted URL]')
+  .slice(0, 240);
+
+const getSafeProviderError = (body) => {
+  const code = typeof body?.code === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(body.code)
+    ? body.code
+    : undefined;
+  const message = sanitizeProviderMessage(body?.message);
+  return {
+    ...(code ? { providerCode: code } : {}),
+    ...(message ? { providerMessage: message } : {}),
+  };
+};
+
 const createBrevoEmailService = ({ fetchImpl = globalThis.fetch, getEnv = () => process.env } = {}) => {
   const sendOtpEmail = async ({ to, code, purpose }) => {
     const env = getEnv();
-    if (!env.BREVO_API_KEY || !env.BREVO_EMAIL_FROM) {
+    const apiKey = String(env.BREVO_API_KEY || '').trim();
+    const senderEmail = String(env.BREVO_EMAIL_FROM || '').trim();
+    if (!apiKey || !senderEmail) {
       const error = new Error('Email verification is temporarily unavailable. Please try again later.');
       error.statusCode = 503;
       throw error;
@@ -36,11 +59,11 @@ const createBrevoEmailService = ({ fetchImpl = globalThis.fetch, getEnv = () => 
         method: 'POST',
         headers: {
           accept: 'application/json',
-          'api-key': env.BREVO_API_KEY,
+          'api-key': apiKey,
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          sender: { name: 'Wrapchik', email: env.BREVO_EMAIL_FROM },
+          sender: { name: 'Wrapchik', email: senderEmail },
           to: [{ email: to }],
           subject: copy.subject,
           htmlContent: `<!doctype html><html><body style="margin:0;background:#fff8f3;font-family:Arial,sans-serif;color:#242b37"><div style="max-width:520px;margin:32px auto;padding:28px;background:#fff;border:1px solid #f0e5de;border-radius:18px"><div style="display:inline-block;background:#ff5722;color:#fff;border-radius:14px;padding:10px 14px;font-size:22px;font-weight:800">W</div><p style="color:#ff5722;font-size:12px;font-weight:800;letter-spacing:2px">WRAPCHIK</p><h1 style="font-size:24px">${copy.heading}</h1><p>Use this one-time verification code:</p><p style="display:inline-block;background:#fff2eb;border-radius:12px;padding:14px 20px;color:#ff5722;font-size:30px;font-weight:800;letter-spacing:8px">${safeCode}</p><p>This code expires in 10 minutes. If you did not request it, you can ignore this email.</p><p style="color:#697386;font-size:12px">For your security, do not share this code with anyone.</p></div></body></html>`,
@@ -49,7 +72,10 @@ const createBrevoEmailService = ({ fetchImpl = globalThis.fetch, getEnv = () => 
       });
       const body = await response.json().catch(() => null);
       if (!response.ok || !body?.messageId) {
-        console.warn('[Brevo OTP] Provider rejected verification email', { status: response.status });
+        console.warn('[Brevo OTP] Provider rejected verification email', {
+          status: response.status,
+          ...getSafeProviderError(body),
+        });
         const error = new Error('The email provider could not accept the verification email.');
         error.statusCode = response.status === 429 ? 429 : 502;
         throw error;
@@ -72,4 +98,5 @@ const createBrevoEmailService = ({ fetchImpl = globalThis.fetch, getEnv = () => 
   return { sendOtpEmail };
 };
 
-module.exports = { createBrevoEmailService };
+module.exports = { createBrevoEmailService, sanitizeProviderMessage };
+

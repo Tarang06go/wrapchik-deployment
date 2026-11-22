@@ -12,7 +12,7 @@ const getEmailDeliveryProvider = (env = process.env) => {
   // SMTP remains available to local development. Render Free does not relay SMTP.
   if (SMTP_ENABLED_IN_DEVELOPMENT(env)) return 'gmail';
 
-  if (env.BREVO_API_KEY && emailAddress(env.BREVO_EMAIL_FROM)) return 'brevo';
+  if (String(env.BREVO_API_KEY || '').trim() && emailAddress(env.BREVO_EMAIL_FROM)) return 'brevo';
 
   const resendSender = emailAddress(env.EMAIL_FROM);
   if (env.RESEND_API_KEY && resendSender && !/@resend\.dev$/i.test(resendSender)) return 'resend';
@@ -21,3 +21,4 @@ const getEmailDeliveryProvider = (env = process.env) => {
 };
 
 module.exports = { emailAddress, getEmailDeliveryProvider };
+
