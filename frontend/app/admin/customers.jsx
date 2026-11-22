@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../../components/common/Header';
-import LoadingIndicator from '../../components/common/LoadingIndicator';
 import adminService from '../../services/adminService';
 import COLORS from '../../constants/colors';
+import { AdminLoadingState } from '../../components/admin/AdminPrimitives';
 
 const money = (amount) => `₹${Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
@@ -44,7 +44,7 @@ export default function AdminCustomersScreen() {
       <Text style={styles.caption}>Read-only verified order counts and spend. Account access changes are recorded in an admin audit log.</Text>
       <TextInput value={search} onChangeText={setSearch} placeholder="Search student name or email" accessibilityLabel="Search customers" style={styles.search} autoCapitalize="none" />
       {error ? <TouchableOpacity onPress={load} accessibilityRole="button"><Text style={styles.error}>{error} · Tap to retry</Text></TouchableOpacity> : null}
-      {loading && !customers.length ? <LoadingIndicator message="Loading customers…" /> : <FlatList
+      {loading && !customers.length ? <AdminLoadingState message="Loading customers…" /> : <FlatList
         data={customers}
         keyExtractor={(item) => item._id}
         contentContainerStyle={customers.length ? styles.list : styles.emptyList}

@@ -17,7 +17,19 @@ const sweepExpiredGroups = async ({ now = new Date(), batchSize = 100 } = {}) =>
     );
     if (!updated) continue;
     expired += 1;
+    await require('../utils/groupActivity').recordGroupActivity({ groupId: updated._id, type: 'GROUP_EXPIRED', message: 'The group invite expired and the group was closed.', createdAt: timestamp });
     socketManager.emitGroupUpdate(updated);
+    const { createNotification } = require('../controllers/notificationController');
+    const { notifyJoinedGroupMembers } = require('../utils/groupOrderNotifications');
+    await notifyJoinedGroupMembers({
+      members: updated.members,
+      title: 'Your Share a Meal invite has expired',
+      message: 'The group invite deadline passed before checkout. Start a new group to order together.',
+      type: 'SYSTEM',
+      orderId: updated.orderId || null,
+      dedupePrefix: `group:${updated._id}:expired`,
+      createNotification,
+    });
   }
   return expired;
 };

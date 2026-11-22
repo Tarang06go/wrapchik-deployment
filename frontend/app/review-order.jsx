@@ -64,7 +64,7 @@ export default function ReviewOrderScreen() {
         <TextInput value={comment} onChangeText={setComment} editable={!existing} maxLength={500} multiline textAlignVertical="top" style={styles.input} placeholder="Tell the outlet what went well or what could improve" accessibilityLabel="Optional order review comment" />
         <Text style={styles.count}>{comment.length}/500</Text>
         {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
-        {notice ? <Text style={styles.success} accessibilityRole="status">{notice}</Text> : null}
+        {notice ? <Text style={styles.success} accessibilityLiveRegion="polite">{notice}</Text> : null}
         {existing ? <Text style={styles.message}>Submitted {new Date(existing.createdAt).toLocaleDateString()}.</Text> : <Button title={saving ? 'Submitting…' : 'Submit review'} onPress={submit} loading={saving} disabled={!orderId} style={styles.submit} />}
       </>}
       <Button title="Back to orders" variant="outline" onPress={() => router.replace('/(tabs)/orders')} style={styles.submit} />

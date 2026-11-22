@@ -48,13 +48,16 @@ test('customer settings links only to existing functional account screens', () =
   assert.match(navigation, /pathname === '\/settings'.*\(tabs\)\/profile/);
 });
 
-test('home exposes real offers, a pageable campaign carousel, popular items, order-again and group ordering', () => {
+test('home uses compact priority content, a pageable campaign carousel and contextual order-again content', () => {
   const home = read('../app/(tabs)/home.jsx');
   for (const text of ['Deals & offers', 'Popular on campus', 'Order again', 'Share a Meal']) assert.ok(home.includes(text), `home section missing: ${text}`);
   assert.match(home, /snapToInterval=\{promoStep\}/);
   assert.match(home, /promoCarouselRef\.current\?\.scrollTo/);
-  assert.match(home, /accessibilityLabel=\{`Open cart with \$\{cartCount\} items`\}/);
-  assert.match(home, /Your past picks will show up here/);
+  assert.match(home, /showCart=\{!searchFocused\}/);
+  assert.match(home, /READY FOR PICKUP/);
+  assert.match(home, /PAYMENT NEEDED/);
+  assert.match(home, /activeGroupId/);
+  assert.match(home, /previouslyOrderedProducts\.length/);
 });
 
 test('track and history empty states explain their current order filter', () => {
@@ -68,7 +71,7 @@ test('home rail uses verified order-history products and product cards animate c
   const productCard = read('../components/product/ProductCard.jsx');
   assert.match(home, /previouslyOrderedProducts/);
   assert.match(home, /Order again/);
-  assert.match(home, /<ProductCard product=\{product\}/);
+  assert.match(home, /<ProductCard compact product=\{product\}/);
   assert.match(productCard, /Animated\.spring\(stepperScale/);
   assert.match(productCard, /addToCartHaptic\(\)/);
 });

@@ -1,4 +1,4 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Linking, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Trash2, MapPin } from 'lucide-react-native';
@@ -10,12 +10,22 @@ import EmptyState from '../../components/common/EmptyState';
 import COLORS from '../../constants/colors';
 import { outletDirectionsUrl } from '../../utils/outletDirections';
 import settingsService from '../../services/settingsService';
+import { getConfiguredPickupPoint } from '../../utils/configuredPickupPoint';
 
 export default function CartScreen() {
   const router = useRouter();
   const { cartItems, cartCount, subtotal, taxAndFees, grandTotal, clearCart } = useContext(CartContext);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [directionsBusy, setDirectionsBusy] = useState(false);
+  const [pickupLocation, setPickupLocation] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    settingsService.getSettings().then(response => {
+      if (active) setPickupLocation(getConfiguredPickupPoint(response?.settings));
+    }).catch(() => { if (active) setPickupLocation(''); });
+    return () => { active = false; };
+  }, []);
 
   const confirmClear = () => Alert.alert('Clear your cart?', 'All items will be removed from this cart.', [
     { text: 'Keep items', style: 'cancel' },
@@ -26,12 +36,8 @@ export default function CartScreen() {
     if (directionsBusy) return;
     setDirectionsBusy(true);
     try {
-      let location;
-      try {
-        const response = await settingsService.getSettings();
-        location = response?.settings?.pickupLocation;
-      } catch { /* use the documented TIET outlet fallback when settings cannot load */ }
-      await Linking.openURL(outletDirectionsUrl(Platform.OS, location));
+      if (!pickupLocation) return;
+      await Linking.openURL(outletDirectionsUrl(Platform.OS, pickupLocation));
     } catch {
       if (Platform.OS !== 'web') Alert.alert('Directions unavailable', 'Open Google Maps and search for the Wrapchik SAC Counter at TIET Patiala.');
     } finally { setDirectionsBusy(false); }
@@ -40,6 +46,11 @@ export default function CartScreen() {
   return (
     <View style={styles.container}>
       <Header title="My Cart" showCart={false} />
+
+      <TouchableOpacity onPress={() => router.push('/my-groups')} style={styles.groupCartButton} accessibilityRole="button" accessibilityLabel="Open group carts separately from your personal cart">
+        <Text style={styles.groupCartTitle}>Share a Meal · My Groups</Text>
+        <Text style={styles.groupCartCopy}>View or resume a group cart. Group items stay separate from this personal cart.</Text>
+      </TouchableOpacity>
 
       {cartItems.length === 0 ? (
         <EmptyState
@@ -71,11 +82,11 @@ export default function CartScreen() {
           <View style={styles.pickupBox}>
             <MapPin size={18} color={COLORS.primary} />
             <Text style={styles.pickupText}>
-              Pickup at <Text style={styles.pickupBold}>Wrapchik SAC Counter</Text>. You can select another enabled option at checkout.
+              Pickup at <Text style={styles.pickupBold}>{pickupLocation || 'Wrapchik SAC Counter'}</Text>.
             </Text>
-            <TouchableOpacity onPress={openDirections} disabled={directionsBusy} style={styles.directionsButton} accessibilityRole="button" accessibilityLabel="Open Google Maps directions to Wrapchik pickup">
+            {pickupLocation ? <TouchableOpacity onPress={openDirections} disabled={directionsBusy} style={styles.directionsButton} accessibilityRole="button" accessibilityLabel="Open Google Maps directions to configured Wrapchik pickup">
               <Text style={styles.directionsText}>{directionsBusy ? 'Opening…' : 'Directions'}</Text>
-            </TouchableOpacity>
+            </TouchableOpacity> : null}
           </View>
 
           {/* Bill Summary Breakdown */}
@@ -119,12 +130,15 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
+  groupCartButton: { marginHorizontal: 16, marginTop: 12, marginBottom: 4, padding: 13, borderRadius: 15, backgroundColor: COLORS.primaryLight, borderWidth: 1, borderColor: '#F6C8B8' },
+  groupCartTitle: { color: COLORS.primaryDark, fontSize: 13, fontWeight: '900' },
+  groupCartCopy: { color: COLORS.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 3 },
   clearHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 10,
   },
   itemCountText: {
     fontSize: 14,
@@ -169,9 +183,9 @@ const styles = StyleSheet.create({
   },
   billCard: {
     backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    padding: 14,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
     borderWidth: 1,
     borderColor: COLORS.border,
     shadowColor: '#000',

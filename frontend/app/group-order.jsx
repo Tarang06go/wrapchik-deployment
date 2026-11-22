@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { View, StyleSheet, Text, TextInput, TouchableOpacity, Alert, ScrollView, KeyboardAvoidingView, Platform, Share } from 'react-native';
+import { View, StyleSheet, Text, TextInput, TouchableOpacity, Alert, ScrollView, KeyboardAvoidingView, Platform, Share, Linking } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import QRCode from 'react-native-qrcode-svg';
 import { Users, PlusCircle, LogIn, Lock, LogOut, ShoppingBag, Truck, Crown, CheckCircle2 } from 'lucide-react-native';
@@ -10,6 +10,11 @@ import { AuthContext } from '../context/AuthContext';
 import { SocketContext } from '../context/SocketContext';
 import COLORS from '../constants/colors';
 import THEME from '../constants/theme';
+import settingsService from '../services/settingsService';
+import { outletDirectionsUrl } from '../utils/outletDirections';
+import { getConfiguredPickupPoint } from '../utils/configuredPickupPoint';
+import { validateNumericText } from '../utils/adminNumericForm.cjs';
+import safeStorage from '../services/safeStorage';
 
 export default function GroupOrderScreen() {
   const router = useRouter();
@@ -22,8 +27,16 @@ export default function GroupOrderScreen() {
   const [hostel, setHostel] = useState('');
   const [roomNumber, setRoomNumber] = useState('');
   const [maxMembers, setMaxMembers] = useState('5');
+  const [maxMembersError, setMaxMembersError] = useState('');
+  const [groupName, setGroupName] = useState('');
   const [groupDetails, setGroupDetails] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [pickupLocation, setPickupLocation] = useState('');
+  const [restoringGroup, setRestoringGroup] = useState(false);
+  const [restoreError, setRestoreError] = useState('');
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
+  const storageKey = user?._id ? `wrapchik_active_group_${user._id}` : '';
+  const requestedGroupId = Array.isArray(params.groupId) ? params.groupId[0] : params.groupId;
   const incomingCode = Array.isArray(params.code) ? params.code[0] : params.code;
   const inviteUrl = groupDetails?.groupCode ? `wrapchik://group/${encodeURIComponent(groupDetails.groupCode)}` : '';
 
@@ -33,6 +46,43 @@ export default function GroupOrderScreen() {
     setGroupCode(cleanCode);
     setTab('JOIN');
   }, [incomingCode]);
+
+  useEffect(() => {
+    let active = true;
+    settingsService.getSettings().then(response => {
+      if (active) setPickupLocation(getConfiguredPickupPoint(response?.settings));
+    }).catch(() => { if (active) setPickupLocation(''); });
+    return () => { active = false; };
+  }, []);
+
+  // Persist only the group ID, then always revalidate access with the backend.
+  useEffect(() => {
+    if (!storageKey) return undefined;
+    let active = true;
+    (async () => {
+      setRestoringGroup(true);
+      setRestoreError('');
+      try {
+        const storedId = requestedGroupId || await safeStorage.getItem(storageKey);
+        if (!active || !storedId) return;
+        if (!/^[a-f\d]{24}$/i.test(String(storedId))) { void safeStorage.removeItem(storageKey); return; }
+        const response = await groupService.getGroupDetails(String(storedId));
+        if (active && response?.success && response.group) {
+          setGroupDetails(response.group);
+          setTab('LOBBY');
+          void safeStorage.setItem(storageKey, String(storedId));
+        }
+      } catch (error) {
+        // Keep a valid saved ID across temporary offline/API failures. Remove it
+        // only after the backend proves the stored reference is invalid/forbidden.
+        if (active && !requestedGroupId && [403, 404, 410].includes(error?.status)) void safeStorage.removeItem(storageKey);
+        if (active && ![403, 404, 410].includes(error?.status)) setRestoreError(error?.message || 'Your saved group could not be checked. It is still saved; retry when you are online.');
+      } finally {
+        if (active) setRestoringGroup(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [requestedGroupId, storageKey, restoreAttempt]);
 
   const shareInvite = async () => {
     if (!groupDetails?.groupCode || !inviteUrl) return;
@@ -44,6 +94,11 @@ export default function GroupOrderScreen() {
     }
   };
 
+  const openPickupDirections = async () => {
+    try { await Linking.openURL(outletDirectionsUrl(Platform.OS, pickupLocation)); }
+    catch { Alert.alert('Directions unavailable', 'Open Google Maps and search for the configured Wrapchik pickup point.'); }
+  };
+
   useEffect(() => {
     const groupId = String(groupDetails?._id || '');
     if (!socket || !groupId) return undefined;
@@ -53,6 +108,7 @@ export default function GroupOrderScreen() {
       if (!isStillMember) {
         setGroupDetails(null);
         setTab('CREATE');
+        if (storageKey) void safeStorage.removeItem(storageKey);
         Alert.alert('Group updated', 'You are no longer a member of this group.');
         return;
       }
@@ -73,9 +129,12 @@ export default function GroupOrderScreen() {
     socket.on('refresh_authoritative_state', refreshGroup);
     socket.on('connect', refreshGroup);
     return () => { socket.off('group_updated', onGroupUpdated); socket.off('refresh_authoritative_state', refreshGroup); socket.off('connect', refreshGroup); };
-  }, [socket, groupDetails?._id, user?._id]);
+  }, [socket, groupDetails?._id, user?._id, storageKey]);
 
   const handleCreateGroup = async () => {
+    const memberCount = validateNumericText(maxMembers, { label: 'Maximum group members', min: 2, max: 8, integer: true });
+    if (memberCount.error) { setMaxMembersError(memberCount.error); return; }
+    setMaxMembersError('');
     if (orderType === 'DELIVERY' && !hostel.trim()) {
       Alert.alert('Required', 'Please enter your hostel or delivery location.');
       return;
@@ -86,7 +145,7 @@ export default function GroupOrderScreen() {
     }
     setLoading(true);
     try {
-      const data = { orderType, maxMembers: parseInt(maxMembers, 10) || 5 };
+      const data = { orderType, maxMembers: memberCount.value, ...(groupName.trim() ? { name: groupName.trim() } : {}) };
       if (orderType === 'DELIVERY') {
         data.hostel = hostel.trim();
         data.roomNumber = roomNumber.trim();
@@ -95,6 +154,7 @@ export default function GroupOrderScreen() {
       if (res.success) {
         setGroupDetails(res.group);
         setTab('LOBBY');
+        if (storageKey) void safeStorage.setItem(storageKey, String(res.group._id));
       } else {
         Alert.alert('Could Not Create', res.message || 'Failed to create group');
       }
@@ -116,6 +176,7 @@ export default function GroupOrderScreen() {
       if (res.success) {
         setGroupDetails(res.group);
         setTab('LOBBY');
+        if (storageKey) void safeStorage.setItem(storageKey, String(res.group._id));
       } else {
         Alert.alert('Could Not Join', res.message || 'Group not found or expired');
       }
@@ -174,6 +235,7 @@ export default function GroupOrderScreen() {
             await groupService.leaveGroup(groupDetails._id);
             setGroupDetails(null);
             setTab('CREATE');
+            if (storageKey) void safeStorage.removeItem(storageKey);
           } catch (e) {
             Alert.alert('Error', e.message || 'Failed to leave group');
           }
@@ -189,6 +251,12 @@ export default function GroupOrderScreen() {
       <Header title="Group Ordering" showBack showCart={false} />
 
       {tab !== 'LOBBY' && (
+        <>
+        {restoringGroup ? <Text style={styles.restoreNotice}>Checking your saved group with the server…</Text> : null}
+        {restoreError ? <View style={styles.restoreError}><Text style={styles.restoreErrorText}>{restoreError}</Text><TouchableOpacity onPress={() => setRestoreAttempt(value => value + 1)} accessibilityRole="button" style={styles.restoreRetry}><Text style={styles.restoreRetryText}>Retry</Text></TouchableOpacity><TouchableOpacity onPress={() => router.push('/my-groups')} accessibilityRole="button" style={styles.restoreRetry}><Text style={styles.restoreRetryText}>My Groups</Text></TouchableOpacity></View> : null}
+        <TouchableOpacity onPress={() => router.push('/my-groups')} style={styles.myGroupsLink} accessibilityRole="button" accessibilityLabel="Open My Groups and resume an existing group">
+          <Users size={16} color={COLORS.primary} /><Text style={styles.myGroupsLinkText}>My Groups · resume a group you created or joined</Text>
+        </TouchableOpacity>
         <View style={styles.tabBar}>
           <TouchableOpacity
             onPress={() => setTab('CREATE')}
@@ -207,6 +275,7 @@ export default function GroupOrderScreen() {
             <Text style={[styles.tabText, tab === 'JOIN' && styles.tabTextActive]}>Join Group</Text>
           </TouchableOpacity>
         </View>
+        </>
       )}
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -220,6 +289,11 @@ export default function GroupOrderScreen() {
               <Text style={styles.formTitle}>Start a group order invite</Text>
               <Text style={styles.formSubtitle}>Invite up to 7 friends. Groups close after 2 hours or when the leader locks the invite.</Text>
 
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Group name (optional)</Text>
+                <TextInput style={styles.textInput} value={groupName} onChangeText={setGroupName} placeholder="e.g. Late night snacks" placeholderTextColor="#9CA3AF" maxLength={48} />
+              </View>
+
               <Text style={styles.fieldLabel}>Order Type</Text>
               <View style={styles.typeRow}>
                 <TouchableOpacity
@@ -229,7 +303,7 @@ export default function GroupOrderScreen() {
                 >
                   <ShoppingBag size={20} color={orderType === 'TAKEAWAY' ? COLORS.primary : COLORS.textSecondary} />
                   <Text style={[styles.typeTitle, orderType === 'TAKEAWAY' && styles.typeTitleActive]}>Takeaway</Text>
-                  <Text style={styles.typeDesc}>SAC Counter</Text>
+                  <Text style={styles.typeDesc}>{pickupLocation ? 'Configured campus point' : 'SAC Counter'}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -242,6 +316,16 @@ export default function GroupOrderScreen() {
                   <Text style={styles.typeDesc}>To Hostel</Text>
                 </TouchableOpacity>
               </View>
+
+              {orderType === 'TAKEAWAY' && pickupLocation ? (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.fieldLabel}>Campus pickup point</Text>
+                  <Text style={styles.typeDesc}>{pickupLocation}</Text>
+                  <TouchableOpacity onPress={openPickupDirections} accessibilityRole="button" style={styles.typeOption}>
+                    <Text style={styles.typeTitle}>Get directions</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
 
               {orderType === 'DELIVERY' && (
                 <View style={styles.inputGroup}>
@@ -269,12 +353,14 @@ export default function GroupOrderScreen() {
                 <TextInput
                   style={styles.textInput}
                   value={maxMembers}
-                  onChangeText={setMaxMembers}
-                  keyboardType="numeric"
+                  onChangeText={value => { setMaxMembers(value); setMaxMembersError(''); }}
+                  keyboardType="number-pad"
                   placeholder="5"
                   placeholderTextColor="#9CA3AF"
                   maxLength={2}
+                  accessibilityHint={maxMembersError || 'Enter a whole number from 2 to 8'}
                 />
+                {maxMembersError ? <Text accessibilityRole="alert" style={styles.validationError}>{maxMembersError}</Text> : null}
               </View>
 
               <Button
@@ -413,6 +499,12 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
     paddingHorizontal: 16,
   },
+  myGroupsLink: { minHeight: 46, marginHorizontal: 16, marginTop: 10, marginBottom: 2, paddingHorizontal: 12, borderRadius: 13, backgroundColor: COLORS.primaryLight, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  myGroupsLinkText: { flex: 1, color: COLORS.primaryDark, fontSize: 12, fontWeight: '800' },
+  restoreNotice: { color: COLORS.textSecondary, fontSize: 12, paddingHorizontal: 18, paddingTop: 10 },
+  restoreError: { marginHorizontal: 16, marginTop: 10, padding: 12, borderRadius: 12, backgroundColor: COLORS.warningLight, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  restoreErrorText: { flex: 1, color: COLORS.textPrimary, fontSize: 11, lineHeight: 16 },
+  restoreRetry: { minHeight: 44, paddingHorizontal: 6, justifyContent: 'center' }, restoreRetryText: { color: COLORS.primaryDark, fontSize: 11, fontWeight: '900' },
   tabItem: {
     flex: 1,
     flexDirection: 'row',
@@ -468,6 +560,7 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginBottom: 8,
   },
+  validationError: { color: COLORS.danger, fontSize: 12, lineHeight: 16, fontWeight: '700', marginTop: -8, marginBottom: 12 },
   typeRow: {
     flexDirection: 'row',
     gap: 12,

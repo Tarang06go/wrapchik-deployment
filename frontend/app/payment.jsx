@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, Linking, Platform, ActivityIndicator, KeyboardAvoidingView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, Linking, Platform, ActivityIndicator, KeyboardAvoidingView, AppState } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
@@ -33,24 +33,53 @@ export default function PaymentScreen() {
   const refresh = useCallback(async (showFeedback = false) => {
     if (!orderId) { setLoading(false); return; }
     try {
+      let hasPendingClaim = false;
+      let instructionsLoaded = true;
       const result = await orderService.getOrderById(orderId);
       if (!result?.success || !result.order) throw new Error('Order details are unavailable.');
       setOrder(result.order);
-      if (result.order.paymentMethod === 'UPI_QR' && result.order.paymentStatus !== 'SUCCESS') {
-        const response = await paymentService.getUpiInstructions(orderId);
-        setInstructions(response?.instructions || null);
+      const currentOrder = result.order;
+      if (currentOrder.paymentMethod === 'UPI_QR' && currentOrder.paymentStatus !== 'SUCCESS'
+        && !['CANCELLED', 'REJECTED'].includes(currentOrder.orderStatus)) {
+        hasPendingClaim = currentOrder.paymentId?.status === 'PENDING' && Boolean(currentOrder.paymentId?.upiTransactionReference);
+        if (hasPendingClaim) {
+          setInstructions(null);
+          setMessage('Your submitted UPI reference is awaiting outlet verification. Do not pay again.');
+          setIsError(false);
+        } else {
+          try {
+            const response = await paymentService.getUpiInstructions(orderId);
+            setInstructions(response?.instructions || null);
+            setMessage(''); setIsError(false);
+          } catch (instructionError) {
+            instructionsLoaded = false;
+            setInstructions(null);
+            setMessage(instructionError.message || 'Payment instructions are unavailable. Refresh the order or contact the outlet.');
+            setIsError(true);
+          }
+        }
+      } else {
+        setInstructions(null);
       }
-      if (result.order.paymentStatus === 'SUCCESS' && !confirmationHandled.current) {
+      if (currentOrder.paymentStatus === 'SUCCESS' && !confirmationHandled.current) {
         confirmationHandled.current = true;
-        routerRef.current.replace({ pathname: '/order-confirmation', params: { orderId, orderNumber: result.order.orderNumber, method: 'UPI (verified by outlet)', celebrate: '1' } });
+        routerRef.current.replace({ pathname: '/order-confirmation', params: { orderId, orderNumber: currentOrder.orderNumber, method: 'UPI (verified by outlet)', celebrate: '1' } });
       }
-      if (showFeedback) { setMessage('Payment status refreshed.'); setIsError(false); }
+      if (showFeedback && hasPendingClaim) { setMessage('Your submitted UPI reference is awaiting outlet verification. Do not pay again.'); setIsError(false); }
+      else if (showFeedback && instructionsLoaded) { setMessage('Payment status refreshed.'); setIsError(false); }
     } catch (error) {
-      if (showFeedback) { setMessage(error.message || 'Could not refresh payment status.'); setIsError(true); }
+      setMessage(error.message || 'Could not refresh payment status. Your saved order is unchanged.'); setIsError(true);
     } finally { setLoading(false); }
   }, [orderId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') void refresh(true);
+    });
+    return () => subscription.remove();
+  }, [refresh]);
 
   const openUpiApp = useCallback(async () => {
     if (!instructions?.upiUri || upiLaunchInFlight.current || order?.paymentStatus === 'SUCCESS') return;
@@ -59,11 +88,11 @@ export default function PaymentScreen() {
     setUpiAppUnavailable(false);
     try {
       await Linking.openURL(instructions.upiUri);
-    } catch {
+    } catch (error) {
       setUpiAppUnavailable(true);
       setMessage(Platform.OS === 'web'
         ? 'A UPI app could not be opened here. Scan the QR code with a UPI app on your phone.'
-        : 'No compatible UPI app opened. Scan the QR code with Google Pay, PhonePe, Paytm, BHIM, or another UPI app.');
+        : `No UPI app completed the handoff${error?.message ? ` (${String(error.message).slice(0, 90)})` : ''}. Wrapchik cannot read a provider's payment alert. Use the QR fallback or copy the link; payment remains pending until outlet verification.`);
       setIsError(false);
     } finally {
       upiLaunchInFlight.current = false;
@@ -117,7 +146,8 @@ export default function PaymentScreen() {
 
   const submittedReference = order.paymentId?.upiTransactionReference;
   const rejectedReason = order.paymentId?.verificationReason;
-  const canSubmit = order.paymentStatus !== 'SUCCESS' && order.orderStatus !== 'CANCELLED' && order.orderStatus !== 'REJECTED' && (!submittedReference || order.paymentStatus === 'FAILED');
+  const hasPendingReference = order.paymentId?.status === 'PENDING' && Boolean(submittedReference);
+  const canSubmit = order.paymentStatus !== 'SUCCESS' && order.orderStatus === 'PLACED' && !hasPendingReference && (!submittedReference || order.paymentStatus === 'FAILED');
   return <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <Header title="UPI payment" showBack showCart={false} />
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}>
@@ -136,14 +166,14 @@ export default function PaymentScreen() {
       <Button title={openingUpi ? 'Opening UPI app…' : 'Pay using UPI App'} onPress={openUpiApp} loading={openingUpi} disabled={!instructions?.upiUri || openingUpi} />
       <Button title="Copy order-specific UPI link" onPress={copyPaymentLink} variant="outline" disabled={!instructions?.upiUri} style={styles.buttonGap} />
       <Text style={styles.instruction}>After paying, return here and submit the UPI transaction reference. The outlet will check its receipt records and confirm the payment manually. Opening an app or submitting a reference never marks an order as paid.</Text>
-      {submittedReference && order.paymentStatus === 'PENDING' ? <View style={styles.pendingBox}><Text style={styles.pendingText}>Reference {submittedReference} is awaiting outlet verification.</Text></View> : null}
+      {hasPendingReference ? <View style={styles.pendingBox}><Text style={styles.pendingText}>Your submitted UPI reference is awaiting outlet verification. Do not pay again. The outlet will update this order after checking receipt.</Text></View> : null}
       {rejectedReason ? <View style={styles.rejectedBox}><Text style={styles.rejectedTitle}>Payment claim rejected</Text><Text style={styles.instruction}>{rejectedReason}</Text></View> : null}
       {canSubmit ? <>
         <Text style={styles.detailLabel}>UPI TRANSACTION REFERENCE</Text>
         <TextInput value={reference} onChangeText={setReference} placeholder="Enter reference from your UPI app" autoCapitalize="characters" style={styles.input} editable={!busy} />
         <Button title={busy ? 'Submitting…' : 'I have completed the payment'} onPress={submitReference} loading={busy} disabled={busy || reference.trim().length < 8} style={styles.buttonGap} />
       </> : null}
-      {message ? <Text accessibilityRole={isError ? 'alert' : 'status'} style={[styles.message, isError && styles.error]}>{message}</Text> : null}
+      {message ? <Text accessibilityRole={isError ? 'alert' : undefined} accessibilityLiveRegion={isError ? 'assertive' : 'polite'} style={[styles.message, isError && styles.error]}>{message}</Text> : null}
       <View style={styles.statusRow}><Text style={styles.status}>Payment status: {order.paymentStatus}</Text><Button title="Refresh status" variant="outline" onPress={() => refresh(true)} /></View>
       <Button title="View order status" variant="outline" onPress={() => router.replace(`/order-tracking/${orderId}`)} style={styles.buttonGap} />
     </ScrollView>

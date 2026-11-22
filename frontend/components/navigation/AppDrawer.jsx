@@ -1,11 +1,12 @@
-import React, { useContext, useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Alert, Animated, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import React, { useContext, useEffect, useRef } from 'react';
+import { Alert, Animated, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Clock3, Gift, Heart, HelpCircle, Home, LogOut, MapPin, Settings, Shield, Tag, UtensilsCrossed, User, Users, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthContext } from '../../context/AuthContext';
 import COLORS from '../../constants/colors';
 import { selectionHaptic } from '../../utils/haptics';
+import { useReducedMotion } from '../../utils/reducedMotion';
 
 const links = [
   { label: 'Home', route: '/(tabs)/home', Icon: Home },
@@ -14,6 +15,7 @@ const links = [
   { label: 'Track Order', route: '/(tabs)/orders', params: { filter: 'ACTIVE' }, Icon: MapPin },
   { label: 'Order History', route: '/(tabs)/orders', params: { filter: 'COMPLETED' }, Icon: Clock3 },
   { label: 'Share a Meal', route: '/group-order', Icon: Users },
+  { label: 'My Groups', route: '/my-groups', Icon: Users, studentsOnly: true },
   { label: 'Rewards', route: '/loyalty', Icon: Gift, studentsOnly: true },
   { label: 'Favourites', route: '/favourites', Icon: Heart },
   { label: 'Support', route: '/support', Icon: HelpCircle },
@@ -28,27 +30,21 @@ export default function AppDrawer({ visible, onClose }) {
   const { user, logout } = useContext(AuthContext);
   const progress = useRef(new Animated.Value(0)).current;
   const closeInFlight = useRef(false);
-  const [reduceMotion, setReduceMotion] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    AccessibilityInfo.isReduceMotionEnabled().then(value => { if (active) setReduceMotion(Boolean(value)); }).catch(() => {});
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', value => setReduceMotion(Boolean(value)));
-    return () => { active = false; subscription.remove(); };
-  }, []);
+  const reduceMotion = useReducedMotion();
+  const motionDisabled = reduceMotion !== false;
 
   useEffect(() => {
     if (!visible) return;
     closeInFlight.current = false;
     progress.setValue(0);
-    Animated.timing(progress, { toValue: 1, duration: reduceMotion ? 0 : 210, useNativeDriver: true }).start();
-  }, [visible, reduceMotion, progress]);
+    Animated.timing(progress, { toValue: 1, duration: motionDisabled ? 0 : 210, useNativeDriver: true }).start();
+  }, [visible, motionDisabled, progress]);
 
   const closeAfterAnimation = (action) => {
     if (closeInFlight.current) return;
     closeInFlight.current = true;
     selectionHaptic();
-    Animated.timing(progress, { toValue: 0, duration: reduceMotion ? 0 : 170, useNativeDriver: true }).start(({ finished }) => {
+    Animated.timing(progress, { toValue: 0, duration: motionDisabled ? 0 : 170, useNativeDriver: true }).start(({ finished }) => {
       closeInFlight.current = false;
       if (!finished) return;
       onClose?.();

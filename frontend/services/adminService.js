@@ -1,4 +1,7 @@
 import api from './api';
+import { invalidateReadCache } from './readCache';
+
+const saveSettings = data => api.put('/settings', data).then(result => { invalidateReadCache('catalog:settings'); return result; });
 
 const adminService = {
   getAllOrders: (params = {}) => {
@@ -24,9 +27,7 @@ const adminService = {
   getCustomers: (params = {}) => api.get('/admin/customers', { params }),
   setCustomerActive: (id, isActive) => api.patch(`/admin/customers/${id}/status`, { isActive }),
 
-  updateSettings: (data) => {
-    return api.put('/settings', data);
-  },
+  updateSettings: saveSettings,
 };
 
 export default adminService;

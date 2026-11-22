@@ -5,7 +5,7 @@ dotenv.config();
 
 const models = [
   'User', 'Order', 'Product', 'Category', 'Payment', 'Notification', 'WebhookEvent', 'Coupon',
-  'PickupSlot', 'RestaurantSettings', 'OtpChallenge', 'EmailOtpChallenge', 'Table', 'GroupOrder', 'Issue', 'OrderReview', 'LoyaltyLedger',
+  'PickupSlot', 'RestaurantSettings', 'OtpChallenge', 'EmailOtpChallenge', 'Table', 'GroupOrder', 'GroupActivity', 'Issue', 'OrderReview', 'LoyaltyLedger',
 ].map(name => require(`../models/${name}`));
 
 const sameIndex = (actual, expectedKeys, expectedOptions) => {

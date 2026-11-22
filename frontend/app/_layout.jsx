@@ -8,13 +8,14 @@ import { NotificationProvider } from '../context/NotificationContext';
 import { usePathname, useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
-import { AccessibilityInfo, BackHandler, Keyboard, Platform } from 'react-native';
+import { BackHandler, Keyboard, Platform } from 'react-native';
 import { AuthContext } from '../context/AuthContext';
 import { backFallback } from '../utils/navigation';
 import OfflineBanner from '../components/common/OfflineBanner';
 import RouteErrorBoundary from '../components/common/RouteErrorBoundary';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StyleSheet, View } from 'react-native';
+import { useReducedMotion } from '../utils/reducedMotion';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -24,6 +25,12 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
+
+function reportExpensiveRender(id, phase, actualDuration, baseDuration) {
+  if (__DEV__ && actualDuration >= 16) {
+    console.warn('[Wrapchik Render] slow commit', { id, phase, actualDuration: Math.round(actualDuration), baseDuration: Math.round(baseDuration) });
+  }
+}
 
 function PushNotificationBridge() {
   const router = useRouter();
@@ -95,13 +102,7 @@ function MobileInteractionDiagnostics() {
 }
 
 export default function RootLayout() {
-  const [reduceMotion, setReduceMotion] = React.useState(false);
-  useEffect(() => {
-    let active = true;
-    AccessibilityInfo.isReduceMotionEnabled().then(value => { if (active) setReduceMotion(Boolean(value)); }).catch(() => {});
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', value => setReduceMotion(Boolean(value)));
-    return () => { active = false; subscription.remove(); };
-  }, []);
+  const reduceMotion = useReducedMotion();
   return (
     <SafeAreaProvider>
     <AuthProvider>
@@ -115,6 +116,7 @@ export default function RootLayout() {
         <AndroidBackFallback />
         <MobileInteractionDiagnostics />
         <RouteErrorBoundary>
+        <React.Profiler id="expo-router" onRender={reportExpensiveRender}>
         <Stack screenOptions={{ headerShown: false, animation: reduceMotion ? 'none' : 'fade' }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="splash" />
@@ -140,11 +142,14 @@ export default function RootLayout() {
           <Stack.Screen name="review-order" />
           <Stack.Screen name="loyalty" />
           <Stack.Screen name="group-order" />
+          <Stack.Screen name="my-groups" />
+          <Stack.Screen name="my-group/[id]" />
           <Stack.Screen name="group/[code]" />
           <Stack.Screen name="group-cart/[id]" />
           <Stack.Screen name="report-issue" />
           <Stack.Screen name="admin/issues" />
         </Stack>
+        </React.Profiler>
         </RouteErrorBoundary>
           </View>
         </CartProvider>

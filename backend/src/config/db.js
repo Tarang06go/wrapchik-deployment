@@ -9,7 +9,8 @@ const connectDB = async () => {
 
     console.log(`[MongoDB] Connected Successfully: ${conn.connection.host}`);
   } catch (error) {
-    console.error(`[MongoDB Error] Connection Failed: ${error.message}`);
+    // Driver messages can include connection details. Keep credentials and URI out of logs.
+    console.error('[MongoDB] Connection failed.');
     throw error;
   }
 };

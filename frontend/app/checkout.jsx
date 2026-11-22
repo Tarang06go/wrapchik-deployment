@@ -11,6 +11,7 @@ import { clearCheckoutIntentKey, getCheckoutIntentKey } from '../services/checko
 import settingsService from '../services/settingsService';
 import tableService from '../services/tableService';
 import pickupSlotService from '../services/pickupSlotService';
+import { getRecommendedPickupSlot } from '../utils/pickupSlotRecommendation';
 import couponService from '../services/couponService';
 import loyaltyService from '../services/loyaltyService';
 import FulfillmentSelector from '../components/checkout/FulfillmentSelector';
@@ -22,6 +23,7 @@ import EmptyState from '../components/common/EmptyState';
 import { safeBack } from '../utils/navigation';
 import { successHaptic } from '../utils/haptics';
 import { outletDirectionsUrl } from '../utils/outletDirections';
+import { getConfiguredPickupPoint } from '../utils/configuredPickupPoint';
 
 
 
@@ -70,6 +72,7 @@ export default function CheckoutScreen() {
   const [loyaltyLoading, setLoyaltyLoading] = useState(false);
   const [loyaltyError, setLoyaltyError] = useState('');
   const checkoutItemsKey = useMemo(() => JSON.stringify(cartItems.map(item => ({ productId: item.productId, quantity: item.quantity, customizations: (item.customizations || []).map(row => row.name).sort() }))), [cartItems]);
+  const recommendedPickupSlot = useMemo(() => getRecommendedPickupSlot(pickupSlots), [pickupSlots]);
   const idempotencyKeyRef = useRef('');
   const preparedFingerprintRef = useRef('');
   const intentFingerprint = useMemo(() => {
@@ -467,9 +470,9 @@ export default function CheckoutScreen() {
                     <Text style={styles.fulfillmentAddress}>
                       {settings?.pickupLocation || 'Wrapchik Counter, SAC Ground Floor'}
                     </Text>
-                    <TouchableOpacity accessibilityRole="button" onPress={openOutletDirections} style={styles.directionsButton}>
-                      <Text style={styles.directionsText}>Get directions to the outlet</Text>
-                    </TouchableOpacity>
+                    {getConfiguredPickupPoint(settings) ? <TouchableOpacity accessibilityRole="button" onPress={openOutletDirections} style={styles.directionsButton}>
+                      <Text style={styles.directionsText}>Get directions to the configured pickup point</Text>
+                    </TouchableOpacity> : null}
 
                     <View style={styles.timeBadge}>
                       <Clock size={16} color={COLORS.warning} />
@@ -480,7 +483,15 @@ export default function CheckoutScreen() {
                       <View style={styles.pickupModeRow}>
                         {['IMMEDIATE', 'SCHEDULED'].map(mode => <TouchableOpacity key={mode} onPress={() => { setPickupMode(mode); setValidationError(''); if (mode === 'IMMEDIATE') setScheduledPickupAt(''); }} style={[styles.pickupModeChip, pickupMode === mode && styles.pickupModeChipActive]}><Text style={[styles.pickupModeText, pickupMode === mode && styles.pickupModeTextActive]}>{mode === 'IMMEDIATE' ? 'As soon as ready' : 'Schedule a time'}</Text></TouchableOpacity>)}
                       </View>
-                      {pickupMode === 'SCHEDULED' ? pickupSlotsLoading ? <Text style={styles.slotHint}>Loading live pickup slots…</Text> : pickupSlotsError ? <ErrorState title="Pickup times unavailable" message={pickupSlotsError} onRetry={() => { setPickupSlotsError(''); pickupSlotService.getAvailableSlots().then(res => setPickupSlots(res?.slots || [])).catch(error => setPickupSlotsError(error.message || 'Retry failed.')); }} /> : pickupSlots.length ? <View style={styles.slotGrid}>{pickupSlots.map(slot => { const selected = scheduledPickupAt === slot.startsAt; return <TouchableOpacity key={slot.startsAt} onPress={() => { setScheduledPickupAt(slot.startsAt); setValidationError(''); }} style={[styles.slotChip, selected && styles.slotChipSelected]}><Text style={[styles.slotText, selected && styles.slotTextSelected]}>{new Date(slot.startsAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</Text><Text style={[styles.slotCapacity, selected && styles.slotTextSelected]}>{slot.availableCount} available</Text></TouchableOpacity>; })}</View> : <Text style={styles.slotHint}>No scheduled pickup times are available. Choose immediate pickup.</Text> : null}
+                      {pickupMode === 'SCHEDULED' ? pickupSlotsLoading ? <Text style={styles.slotHint}>Loading live pickup slots…</Text> : pickupSlotsError ? <ErrorState title="Pickup times unavailable" message={pickupSlotsError} onRetry={() => { setPickupSlotsError(''); pickupSlotService.getAvailableSlots().then(res => setPickupSlots(res?.slots || [])).catch(error => setPickupSlotsError(error.message || 'Retry failed.')); }} /> : pickupSlots.length ? <View style={styles.slotGrid}>{pickupSlots.map(slot => {
+                        const selected = scheduledPickupAt === slot.startsAt;
+                        const recommended = recommendedPickupSlot?.startsAt === slot.startsAt;
+                        const label = new Date(slot.startsAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+                        return <TouchableOpacity key={slot.startsAt} onPress={() => { setScheduledPickupAt(slot.startsAt); setValidationError(''); }} style={[styles.slotChip, selected && styles.slotChipSelected]} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={`${label}, ${slot.availableCount} available${recommended ? ', recommended earliest slot' : ''}`}>
+                          <View style={styles.slotHead}><Text style={[styles.slotText, selected && styles.slotTextSelected]}>{label}</Text>{recommended ? <Text style={[styles.recommendedSlot, selected && styles.recommendedSlotSelected]}>Recommended</Text> : null}</View>
+                          <Text style={[styles.slotCapacity, selected && styles.slotTextSelected]}>{slot.availableCount} available</Text>
+                        </TouchableOpacity>;
+                      })}</View> : <Text style={styles.slotHint}>No scheduled pickup times are available. Choose immediate pickup.</Text> : null}
                     </View> : null}
                   </View>
                 )}
@@ -935,7 +946,10 @@ const styles = StyleSheet.create({
   pickupModeText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700' },
   pickupModeTextActive: { color: COLORS.primary },
   slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  slotChip: { minWidth: 135, padding: 9, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, backgroundColor: '#fff' },
+  slotChip: { minWidth: 165, maxWidth: 260, padding: 10, borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, backgroundColor: '#fff' },
+  slotHead: { gap: 7, justifyContent: 'space-between' },
+  recommendedSlot: { alignSelf: 'flex-start', color: '#2E7D48', backgroundColor: '#EAF5ED', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, fontSize: 11, fontWeight: '800' },
+  recommendedSlotSelected: { color: '#FFFFFF', backgroundColor: 'rgba(255,255,255,.18)' },
   slotChipSelected: { borderColor: COLORS.primary, backgroundColor: COLORS.primary },
   slotText: { color: COLORS.textPrimary, fontSize: 11, fontWeight: '800' },
   slotTextSelected: { color: '#fff' },

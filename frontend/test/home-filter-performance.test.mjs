@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+test('home filter changes are local and do not trigger catalog fetches', () => {
+  const source = fs.readFileSync(new URL('../app/(tabs)/home.jsx', import.meta.url), 'utf8');
+  const fetchDependencies = source.match(/const fetchMenu = useCallback\(async \(\{ refresh = false \} = \{\}\) =>[\s\S]*?\n  \}, \[([^\]]*)\]\);/);
+  assert.ok(fetchDependencies, 'menu fetch callback exists');
+  assert.doesNotMatch(fetchDependencies[1], /searchQuery|selectedCategory|diet|priceRange|sortIndex/);
+  assert.match(source, /lastMenuLoadedAt\.current > 30_000/);
+  assert.match(source, /filterCatalogueProducts\(catalogueProducts/);
+  assert.match(source, /products\.slice\(0, visibleProductCount\)/);
+  assert.match(source, /useState\(24\)/);
+  assert.match(source, /Show more ·/);
+  assert.match(source, /orderService\.getHomeOrderSummary\(\)/);
+  assert.match(source, /filteredCatalogueProducts = useMemo/);
+  assert.match(source, /filterCatalogueProducts\(filteredCatalogueProducts, \{ search: searchQuery, sort: null \}\)/);
+  assert.match(source, /readyOrderRefreshAt\.current < 60_000/);
+  assert.match(source, /data=\{searchQuery\.trim\(\) \? products : \[\]\}/);
+  assert.match(source, /keyboardShouldPersistTaps="always"/);
+  const searchBar = fs.readFileSync(new URL('../components/common/SearchBar.jsx', import.meta.url), 'utf8');
+  assert.match(searchBar, /onKeyPress=\{onKeyPress\}/);
+  assert.match(searchBar, /blurOnSubmit=\{false\}/);
+  const layout = fs.readFileSync(new URL('../app/_layout.jsx', import.meta.url), 'utf8');
+  assert.match(layout, /React\.Profiler id="expo-router"/);
+  assert.match(layout, /actualDuration >= 16/);
+  const api = fs.readFileSync(new URL('../../backend/src/controllers/orderController.js', import.meta.url), 'utf8');
+  assert.match(api, /homeSummary === 'true'/);
+  assert.match(api, /sort\(\{ createdAt: -1 \}\)\.limit\(1\)/);
+  assert.match(api, /sort\(\{ createdAt: -1 \}\)\.limit\(20\)/);
+});

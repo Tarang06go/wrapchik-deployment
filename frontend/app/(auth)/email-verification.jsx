@@ -77,7 +77,7 @@ export default function EmailVerificationScreen() {
       <Input label="6-digit verification code" value={code} onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" keyboardType="number-pad" maxLength={6} accessibilityLabel="6-digit verification code" />
       {__DEV__ && developmentCode ? <Text style={styles.devCode}>LOCAL DEV OTP: {developmentCode}</Text> : null}
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-      {notice ? <Text accessibilityRole="status" style={styles.notice}>{notice}</Text> : null}
+      {notice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text> : null}
       <Button title="Verify & Create Account" onPress={verify} loading={isLoading} disabled={expirySeconds <= 0} />
       <TouchableOpacity accessibilityRole="button" onPress={resend} disabled={busy || resendSeconds > 0} style={styles.resend}>
         <Text style={[styles.resendText, resendSeconds > 0 && styles.disabled]}>{busy ? 'Sending…' : resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : 'Resend code'}</Text>

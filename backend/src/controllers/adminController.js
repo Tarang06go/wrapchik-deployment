@@ -4,6 +4,7 @@ const GroupOrder = require('../models/GroupOrder');
 
 const socketManager = require('../config/socketManager');
 const { restoreStock } = require('../utils/stockReservation');
+const { recordGroupActivity } = require('../utils/groupActivity');
 
 // Allowed status transition state machine map
 const TRANSITIONS_BY_TYPE = {
@@ -111,6 +112,10 @@ const updateOrderStatus = async (req, res, next) => {
       return res.status(409).json({ success: false, message: 'A group order cannot enter kitchen preparation until every outlet contribution is verified.' });
     }
 
+    if (['COMPLETED', 'PICKED_UP', 'DELIVERED', 'SERVED'].includes(status) && order.paymentStatus !== 'SUCCESS') {
+      return res.status(409).json({ success: false, message: 'Confirm payment before completing or handing off this order.' });
+    }
+
     if (['REJECTED', 'CANCELLED'].includes(status) && order.paymentStatus === 'SUCCESS') {
       return res.status(409).json({ success: false, message: 'This order is paid. Cancellation and refunds are not available from this workflow; contact the customer and resolve the payment first.' });
     }
@@ -179,6 +184,10 @@ const updateOrderStatus = async (req, res, next) => {
       await linkedGroup.save();
       socketManager.emitGroupUpdate(linkedGroup);
     }
+    if (linkedGroup) {
+      const activityLabels = { ACCEPTED: 'accepted', PREPARING: 'started preparing', READY: 'marked ready for pickup', PICKED_UP: 'handed off', DELIVERED: 'marked delivered', SERVED: 'marked served', COMPLETED: 'marked collected', REJECTED: 'rejected', CANCELLED: 'cancelled' };
+      await recordGroupActivity({ groupId: linkedGroup._id, actorId: req.user._id, actorName: req.user.name, type: 'ORDER_STATUS_CHANGED', message: `The outlet ${activityLabels[status] || 'updated'} the group order.` });
+    }
     if (['REJECTED', 'CANCELLED', 'COMPLETED', 'DELIVERED', 'SERVED'].includes(status)) await require('./pickupSlotController').releasePickupSlot(updatedOrder);
 
     const { createNotification } = require('./notificationController');
@@ -196,6 +205,22 @@ const updateOrderStatus = async (req, res, next) => {
     };
     const message = statusMessages[status] || `Order status updated to ${status}`;
     await createNotification(userId, `Order #${updatedOrder.orderNumber} Update`, message, 'ORDER_UPDATE', updatedOrder._id, `order:${updatedOrder._id}:status:${status}`);
+    if (status === 'READY' && linkedGroup) {
+      const { notifyJoinedGroupMembers } = require('../utils/groupOrderNotifications');
+      const groupReadyMessage = updatedOrder.orderType === 'TAKEAWAY'
+        ? 'Your group order is ready for pickup. Meet the order host at the configured Wrapchik pickup counter.'
+        : 'Your group order is ready for handoff. The order host can coordinate the next step with your group.';
+      await notifyJoinedGroupMembers({
+        members: linkedGroup.members,
+        title: `Share a Meal · Order #${updatedOrder.orderNumber} is ready`,
+        message: groupReadyMessage,
+        type: 'ORDER_UPDATE',
+        orderId: updatedOrder._id,
+        dedupePrefix: `group:${linkedGroup._id}:order:${updatedOrder._id}:ready`,
+        excludeUserId: userId,
+        createNotification,
+      });
+    }
 
     socketManager.emitOrderUpdate(updatedOrder);
     if (linkedGroup) socketManager.emitGroupUpdate(linkedGroup);

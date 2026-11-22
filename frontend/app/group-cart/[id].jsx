@@ -41,6 +41,7 @@ export default function GroupCartScreen() {
   const [referenceByContribution, setReferenceByContribution] = useState({});
   const [paymentBusy, setPaymentBusy] = useState('');
   const [minimumGroupOrderValue, setMinimumGroupOrderValue] = useState(0);
+  const [acceptingOrders, setAcceptingOrders] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,6 +56,7 @@ export default function GroupCartScreen() {
       setGroup(groupResult.group);
       setProducts((productResult?.products || []).filter((product) => product.available !== false));
       setMinimumGroupOrderValue(Math.max(0, Number(settingsResult?.settings?.groupMinimumOrderValue || 0)));
+      setAcceptingOrders(typeof settingsResult?.settings?.acceptingOrders === 'boolean' ? settingsResult.settings.acceptingOrders : null);
     } catch (loadError) {
       setError(loadError.message || 'The shared cart could not be loaded.');
     } finally {
@@ -221,6 +223,10 @@ export default function GroupCartScreen() {
           <Text style={styles.title}>Food picked together</Text>
           <Text style={styles.subtitle}>{activeMembers.length} active members · {isLocked ? 'Invite locked' : 'Each person manages their own items'}</Text>
         </View>
+        <View style={[styles.storeState, acceptingOrders === true ? styles.storeOpen : acceptingOrders === false ? styles.storeClosed : styles.storeUnknown]} accessibilityRole="summary">
+          <Text style={styles.storeStateText}>{acceptingOrders === true ? 'Outlet is accepting orders' : acceptingOrders === false ? 'Outlet is closed to new orders' : 'Outlet availability could not be confirmed'}</Text>
+          {acceptingOrders !== true ? <Text style={styles.itemMeta}>{acceptingOrders === false ? 'You can still review this group. Checkout will become available when the outlet reopens.' : 'Refresh the group to check availability before checkout.'}</Text> : null}
+        </View>
 
         <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Shared cart</Text><Text style={styles.total}>{money(totalPaise)}</Text></View>
         {minimumGroupOrderValue > 0 ? <View style={styles.minimumProgress}>
@@ -305,7 +311,7 @@ export default function GroupCartScreen() {
             <Text style={styles.itemMeta}>{quote.message}</Text>
           </View>}
           {quote?.meetsMinimumOrder === false ? <Text style={styles.warning}>The current verified menu subtotal is below the outlet’s group minimum. Add items and refresh the quote before checkout.</Text> : null}
-          <Button title="Place group order" onPress={placeOrder} loading={checkoutBusy} disabled={!quote || quoteLoading || Boolean(quoteError) || quote.meetsMinimumOrder === false} style={styles.smallButton} />
+          <Button title="Place group order" onPress={placeOrder} loading={checkoutBusy} disabled={acceptingOrders !== true || !quote || quoteLoading || Boolean(quoteError) || quote.meetsMinimumOrder === false} style={styles.smallButton} />
         </View> : null}
         {group.status === 'LOCKED' && !isLeader ? <View style={styles.checkoutCard}>
           <Text style={styles.checkoutTitle}>The group leader controls checkout</Text>
@@ -373,6 +379,11 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { padding: 18, paddingBottom: 44, width: '100%', maxWidth: 760, alignSelf: 'center' },
   summary: { backgroundColor: '#FFF', borderColor: COLORS.border, borderWidth: 1, borderRadius: 18, padding: 18, marginBottom: 18 },
+  storeState: { borderWidth: 1, borderRadius: 13, padding: 12, marginBottom: 12 },
+  storeOpen: { backgroundColor: '#ECF8EF', borderColor: '#B8E2C2' },
+  storeClosed: { backgroundColor: '#FFF2E8', borderColor: '#FFD2B4' },
+  storeUnknown: { backgroundColor: '#F5F6F8', borderColor: COLORS.border },
+  storeStateText: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '800' },
   eyebrow: { color: COLORS.primary, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   title: { fontSize: 22, fontWeight: '900', color: COLORS.textPrimary, marginTop: 6 },
   subtitle: { color: COLORS.textSecondary, marginTop: 4, fontSize: 13 },

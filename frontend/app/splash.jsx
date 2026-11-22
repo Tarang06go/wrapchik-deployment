@@ -10,6 +10,12 @@ export default function SplashScreen() {
   const startedAt = useRef(Date.now());
   const logoEntrance = useRef(new Animated.Value(0)).current;
   const copyEntrance = useRef(new Animated.Value(0)).current;
+  const foodFloaters = useRef([
+    { emoji: '🌯', motion: new Animated.Value(0), position: { top: '19%', left: '9%' }, delay: 0 },
+    { emoji: '🍟', motion: new Animated.Value(0), position: { top: '23%', right: '10%' }, delay: 180 },
+    { emoji: '🍔', motion: new Animated.Value(0), position: { bottom: '22%', left: '12%' }, delay: 340 },
+    { emoji: '🥤', motion: new Animated.Value(0), position: { bottom: '19%', right: '12%' }, delay: 520 },
+  ]).current;
   const [reduceMotion, setReduceMotion] = useState(false);
 
   useEffect(() => {
@@ -28,8 +34,14 @@ export default function SplashScreen() {
       Animated.timing(copyEntrance, { toValue: 1, duration: 620, delay: 120, useNativeDriver: true }),
     ]);
     animation.start();
-    return () => animation.stop();
-  }, [copyEntrance, logoEntrance, reduceMotion]);
+    const floaterLoops = foodFloaters.map((floater, index) => Animated.loop(Animated.sequence([
+      Animated.timing(floater.motion, { toValue: 0, duration: 1, delay: floater.delay, useNativeDriver: true }),
+      Animated.timing(floater.motion, { toValue: 1, duration: 1200 + index * 110, useNativeDriver: true }),
+      Animated.timing(floater.motion, { toValue: 0, duration: 1300 + index * 100, useNativeDriver: true }),
+    ])));
+    floaterLoops.forEach(loop => loop.start());
+    return () => { animation.stop(); floaterLoops.forEach(loop => loop.stop()); };
+  }, [copyEntrance, foodFloaters, logoEntrance, reduceMotion]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -55,6 +67,15 @@ export default function SplashScreen() {
 
   return (
     <View style={styles.container}>
+      <View pointerEvents="none" accessible={false} style={StyleSheet.absoluteFill}>
+        {foodFloaters.map((floater, index) => <Animated.Text key={floater.emoji} style={[styles.foodFloater, floater.position, {
+          opacity: floater.motion.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0.95] }),
+          transform: [
+            { translateY: floater.motion.interpolate({ inputRange: [0, 1], outputRange: [5, -11] }) },
+            { rotate: floater.motion.interpolate({ inputRange: [0, 1], outputRange: [index % 2 ? '7deg' : '-7deg', index % 2 ? '-5deg' : '5deg'] }) },
+          ],
+        }]}>{floater.emoji}</Animated.Text>)}
+      </View>
       <Animated.View style={{ opacity: logoEntrance, transform: [{ scale: logoEntrance.interpolate({ inputRange: [0, 1], outputRange: [0.72, 1] }) }, { rotate: logoEntrance.interpolate({ inputRange: [0, 1], outputRange: ['-8deg', '0deg'] }) }] }}>
       <View style={styles.logoCircle}>
         <Text style={styles.logoIcon}>W</Text>
@@ -76,6 +97,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
+    overflow: 'hidden',
   },
   logoCircle: {
     width: 82,
@@ -108,4 +130,5 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 12,
   },
+  foodFloater: { position: 'absolute', fontSize: 32 },
 });

@@ -2,6 +2,10 @@ import api from './api';
 const groupService = {
   createGroup: (data) => api.post('/groups', data),
   joinGroup: (groupCode) => api.post('/groups/join', { groupCode }),
+  getMyGroups: (params) => api.get('/groups/mine', params ? { params } : undefined),
+  getGroupSummary: (id) => api.get(`/groups/${id}/summary`),
+  getGroupActivity: (id) => api.get(`/groups/${id}/activity`),
+  sendPaymentReminder: (id) => api.post(`/groups/${id}/payment-reminders`),
   getGroupDetails: (id) => api.get(`/groups/${id}`),
   lockGroup: (id) => api.post(`/groups/${id}/lock`),
   leaveGroup: (id) => api.post(`/groups/${id}/leave`),

@@ -1,17 +1,26 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, RefreshControl, TouchableOpacity, Alert, ScrollView, TextInput, Platform } from 'react-native';
+import { View, Text, StyleSheet, FlatList, RefreshControl, TouchableOpacity, Alert, ScrollView, TextInput, Platform, Keyboard, KeyboardAvoidingView } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { useLocalSearchParams } from 'expo-router';
 import Header from '../../components/common/Header';
 import StatusBadge from '../../components/common/StatusBadge';
 import Button from '../../components/common/Button';
-import LoadingIndicator from '../../components/common/LoadingIndicator';
 import EmptyState from '../../components/common/EmptyState';
 import adminService from '../../services/adminService';
 import { SocketContext } from '../../context/SocketContext';
 import COLORS from '../../constants/colors';
 import { isOrderOverdue, orderAgeMinutes } from '../../utils/orderAge';
+import { runAfterPlatformConfirmation, showPlatformAlert } from '../../utils/platformDialogs';
+import { AdminChip, AdminLoadingState } from '../../components/admin/AdminPrimitives';
+import { getAdminOrderAction } from '../../utils/adminOrderAction.cjs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const ORDER_FILTERS = ['ACTIVE', 'ALL', 'PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'COMPLETED', 'PICKED_UP', 'DELIVERED', 'SERVED', 'REJECTED', 'CANCELLED'];
 
 export default function AdminOrdersScreen() {
+  const routeParams = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
+  const requestedFilter = Array.isArray(routeParams.status) ? routeParams.status[0] : routeParams.status;
   const { socket } = React.useContext(SocketContext);
   const [orders, setOrders] = useState([]);
   const [upiClaims, setUpiClaims] = useState([]);
@@ -25,15 +34,21 @@ export default function AdminOrdersScreen() {
   const [orderRejectReason, setOrderRejectReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState('ACTIVE');
+  const [selectedFilter, setSelectedFilter] = useState(() => ORDER_FILTERS.includes(requestedFilter) ? requestedFilter : 'ACTIVE');
   const [loadError, setLoadError] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [overdueMinutes, setOverdueMinutes] = useState(30);
   const [incomingOrderAlerts, setIncomingOrderAlerts] = useState(0);
+  const [updatingOrderIds, setUpdatingOrderIds] = useState(() => new Set());
   const [ageNow, setAgeNow] = useState(Date.now());
   const pageRef = useRef(1);
   const pagingRef = useRef(false);
   const refreshTimerRef = useRef(null);
+  const counterPaymentInFlightRef = useRef(new Set());
+  const orderUpdateInFlightRef = useRef(new Set());
+  const paymentReviewInFlightRef = useRef(new Set());
+  const orderListRef = useRef(null);
+  const orderRejectInputRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -148,6 +163,10 @@ export default function AdminOrdersScreen() {
   };
 
   const handleUpdateStatus = async (orderId, newStatus, reason = '') => {
+    if (orderUpdateInFlightRef.current.has(orderId)) return;
+    orderUpdateInFlightRef.current.add(orderId);
+    setUpdatingOrderIds(previous => new Set(previous).add(orderId));
+    if (newStatus === 'REJECTED') Keyboard.dismiss();
     try {
       const targetOrder = orders.find((o) => o._id === orderId);
       const orderNum = targetOrder ? targetOrder.orderNumber : orderId;
@@ -155,35 +174,39 @@ export default function AdminOrdersScreen() {
       if (newStatus === 'REJECTED') { setRejectingOrderId(''); setOrderRejectReason(''); }
       await fetchAdminOrders();
       const message = `Order #${orderNum} status updated to ${newStatus}.`;
-      if (typeof window !== 'undefined') window.alert(message);
-      else Alert.alert('Status Updated', message);
+      showPlatformAlert(Platform.OS, 'Status Updated', message, { nativeAlert: (...args) => Alert.alert(...args) });
     } catch (e) {
       console.error('[Update Order Status Error]:', e);
       const message = e.message || 'Could not update the order. Refresh and try again.';
-      if (typeof window !== 'undefined') window.alert(message);
-      else Alert.alert('Update Failed', message);
+      showPlatformAlert(Platform.OS, 'Update Failed', message, { nativeAlert: (...args) => Alert.alert(...args) });
+    } finally {
+      orderUpdateInFlightRef.current.delete(orderId);
+      setUpdatingOrderIds(previous => { const next = new Set(previous); next.delete(orderId); return next; });
     }
   };
 
   const handleConfirmCounterPayment = async (orderId) => {
     const confirmMessage = 'Confirm that cash was received for this order? This marks the payment as paid.';
-    const confirmed = typeof window !== 'undefined'
-      ? window.confirm(confirmMessage)
-      : await new Promise((resolve) => Alert.alert('Confirm Cash Payment', confirmMessage, [
-          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'Confirm Received', onPress: () => resolve(true) },
-        ]));
-    if (!confirmed) return;
-
     try {
-      await adminService.confirmCounterPayment(orderId);
-      await fetchAdminOrders();
-      if (typeof window !== 'undefined') window.alert('Counter payment confirmed.');
-      else Alert.alert('Payment Confirmed', 'Counter payment confirmed.');
+      const confirmed = await runAfterPlatformConfirmation({
+        key: orderId,
+        inFlight: counterPaymentInFlightRef.current,
+        platform: Platform.OS,
+        title: 'Confirm Cash Payment',
+        message: confirmMessage,
+        confirmLabel: 'Confirm Received',
+        browserWindow: Platform.OS === 'web' && typeof window !== 'undefined' ? window : undefined,
+        nativeAlert: (...args) => Alert.alert(...args),
+        action: async () => {
+          await adminService.confirmCounterPayment(orderId);
+          await fetchAdminOrders();
+        },
+      });
+      if (!confirmed) return;
+      showPlatformAlert(Platform.OS, 'Payment Confirmed', 'Counter payment confirmed.', { nativeAlert: (...args) => Alert.alert(...args) });
     } catch (e) {
       const message = e.message || 'Could not confirm this payment.';
-      if (typeof window !== 'undefined') window.alert(message);
-      else Alert.alert('Payment Not Confirmed', message);
+      showPlatformAlert(Platform.OS, 'Payment Not Confirmed', message, { nativeAlert: (...args) => Alert.alert(...args) });
     }
   };
 
@@ -195,20 +218,29 @@ export default function AdminOrdersScreen() {
       return;
     }
     if (action === 'VERIFY') {
-      const confirmed = typeof window !== 'undefined'
-        ? window.confirm(`Confirm you verified receipt of ₹${claim.amount} for order #${order?.orderNumber}?`)
-        : await new Promise(resolve => Alert.alert('Verify UPI payment', `Confirm receipt of ₹${claim.amount} for order #${order?.orderNumber}?`, [
-          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'Confirm verified', onPress: () => resolve(true) },
-        ]));
-      if (!confirmed) return;
+      try {
+        const confirmed = await runAfterPlatformConfirmation({
+          key: `upi:${claim._id}`, inFlight: paymentReviewInFlightRef.current, platform: Platform.OS,
+          title: 'Verify UPI payment', message: `Confirm receipt of ₹${claim.amount} for order #${order?.orderNumber}?`,
+          confirmLabel: 'Confirm verified', browserWindow: Platform.OS === 'web' && typeof window !== 'undefined' ? window : undefined,
+          nativeAlert: (...args) => Alert.alert(...args),
+          action: async () => {
+            await adminService.reviewUpiPayment(claim._id, action);
+            await Promise.all([fetchUpiClaims(), fetchAdminOrders({ quiet: true })]);
+          },
+        });
+        if (!confirmed) return;
+      } catch (error) {
+        showPlatformAlert(Platform.OS, 'Payment review failed', error.message || 'Could not review this UPI payment.', { nativeAlert: (...args) => Alert.alert(...args) });
+      }
+      return;
     }
     try {
       await adminService.reviewUpiPayment(claim._id, action);
       await Promise.all([fetchUpiClaims(), fetchAdminOrders({ quiet: true })]);
     } catch (error) {
       const message = error.message || 'Could not review this UPI payment.';
-      if (typeof window !== 'undefined') window.alert(message); else Alert.alert('Payment review failed', message);
+      showPlatformAlert(Platform.OS, 'Payment review failed', message, { nativeAlert: (...args) => Alert.alert(...args) });
     }
   };
 
@@ -221,7 +253,7 @@ export default function AdminOrdersScreen() {
       await Promise.all([fetchUpiClaims(), fetchAdminOrders({ quiet: true })]);
     } catch (error) {
       const message = error.message || 'Could not reject this UPI claim.';
-      if (typeof window !== 'undefined') window.alert(message); else Alert.alert('Payment review failed', message);
+      showPlatformAlert(Platform.OS, 'Payment review failed', message, { nativeAlert: (...args) => Alert.alert(...args) });
     }
   };
 
@@ -231,13 +263,23 @@ export default function AdminOrdersScreen() {
       const amount = (Number(contribution.amountPaise) / 100).toFixed(2);
       const label = contribution.method === 'COUNTER' ? 'Confirm cash was received' : `Confirm the UPI receipt for reference ${contribution.upiTransactionReference || ''}`;
       const message = `${label} for ₹${amount} from ${entry.member?.name || 'this group member'}? Only verify money received by the outlet.`;
-      const confirmed = typeof window !== 'undefined'
-        ? window.confirm(message)
-        : await new Promise(resolve => Alert.alert('Verify group contribution', message, [
-          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'Confirm received', onPress: () => resolve(true) },
-        ]));
-      if (!confirmed) return;
+      try {
+        const confirmed = await runAfterPlatformConfirmation({
+          key: `group-contribution:${entry.groupId}:${contribution._id}`, inFlight: paymentReviewInFlightRef.current,
+          platform: Platform.OS, title: 'Verify group contribution', message, confirmLabel: 'Confirm received',
+          browserWindow: Platform.OS === 'web' && typeof window !== 'undefined' ? window : undefined,
+          nativeAlert: (...args) => Alert.alert(...args),
+          action: async () => {
+            await adminService.reviewGroupContribution(entry.groupId, contribution._id, action, reason);
+            setRejectingGroupContributionId(''); setGroupRejectReason('');
+            await Promise.all([fetchGroupContributions(), fetchAdminOrders({ quiet: true }), fetchUpiClaims()]);
+          },
+        });
+        if (!confirmed) return;
+      } catch (error) {
+        showPlatformAlert(Platform.OS, 'Group payment review failed', error.message || 'Could not update this group contribution.', { nativeAlert: (...args) => Alert.alert(...args) });
+      }
+      return;
     }
     try {
       await adminService.reviewGroupContribution(entry.groupId, contribution._id, action, reason);
@@ -245,31 +287,46 @@ export default function AdminOrdersScreen() {
       await Promise.all([fetchGroupContributions(), fetchAdminOrders({ quiet: true }), fetchUpiClaims()]);
     } catch (error) {
       const message = error.message || 'Could not update this group contribution.';
-      if (typeof window !== 'undefined') window.alert(message); else Alert.alert('Group payment review failed', message);
+      showPlatformAlert(Platform.OS, 'Group payment review failed', message, { nativeAlert: (...args) => Alert.alert(...args) });
     }
   };
 
   const handleReconcileGroupPayment = async (entry) => {
     const message = `All recorded contributions for group ${entry.groupCode} have outlet verification records. Reconcile their total against order #${entry.orderNumber}? This will not record a new payment.`;
-    const confirmed = typeof window !== 'undefined'
-      ? window.confirm(message)
-      : await new Promise(resolve => Alert.alert('Reconcile group payment', message, [
-        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-        { text: 'Reconcile', onPress: () => resolve(true) },
-      ]));
-    if (!confirmed) return;
     try {
-      await adminService.reconcileGroupPayment(entry.groupId);
-      await Promise.all([fetchGroupContributions(), fetchAdminOrders({ quiet: true })]);
+      const confirmed = await runAfterPlatformConfirmation({
+        key: `group-reconcile:${entry.groupId}`, inFlight: paymentReviewInFlightRef.current,
+        platform: Platform.OS, title: 'Reconcile group payment', message, confirmLabel: 'Reconcile',
+        browserWindow: Platform.OS === 'web' && typeof window !== 'undefined' ? window : undefined,
+        nativeAlert: (...args) => Alert.alert(...args),
+        action: async () => {
+          await adminService.reconcileGroupPayment(entry.groupId);
+          await Promise.all([fetchGroupContributions(), fetchAdminOrders({ quiet: true })]);
+        },
+      });
+      if (!confirmed) return;
     } catch (error) {
       const text = error.message || 'Could not reconcile this group order payment.';
-      if (typeof window !== 'undefined') window.alert(text); else Alert.alert('Reconciliation failed', text);
+      showPlatformAlert(Platform.OS, 'Reconciliation failed', text, { nativeAlert: (...args) => Alert.alert(...args) });
     }
   };
 
-  const handleRejectOrder = orderId => { setRejectingOrderId(orderId); setOrderRejectReason(''); };
+  const handleRejectOrder = orderId => { Keyboard.dismiss(); setRejectingOrderId(orderId); setOrderRejectReason(''); };
+
+  useEffect(() => {
+    if (!rejectingOrderId) return undefined;
+    const index = orders.findIndex(order => String(order._id) === String(rejectingOrderId));
+    if (index < 0) return undefined;
+    const timer = setTimeout(() => {
+      try { orderListRef.current?.scrollToIndex({ index, viewPosition: 0.04, animated: true }); }
+      catch { /* onScrollToIndexFailed below retries after layout */ }
+      setTimeout(() => orderRejectInputRef.current?.focus(), 180);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [rejectingOrderId, orders]);
 
   return (
+    <KeyboardAvoidingView style={styles.keyboardContainer} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
     <View style={styles.container}>
       <Header title="Kitchen & order desk" showBack showCart={false} />
 
@@ -325,41 +382,50 @@ export default function AdminOrdersScreen() {
 
       {/* Filter Tabs */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow} keyboardShouldPersistTaps="handled">
-        {['ACTIVE', 'ALL', 'PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'COMPLETED', 'PICKED_UP', 'DELIVERED', 'SERVED', 'REJECTED', 'CANCELLED'].map((filter) => (
-          <TouchableOpacity
+        {ORDER_FILTERS.map((filter) => (
+          <AdminChip
             key={filter}
+            selected={selectedFilter === filter}
+            accessibilityLabel={`Show ${filter.toLowerCase()} orders`}
             onPress={() => setSelectedFilter(filter)}
             style={[styles.filterChip, selectedFilter === filter && styles.filterChipActive]}
           >
             <Text style={[styles.filterText, selectedFilter === filter && styles.filterTextActive]}>
               {filter}
             </Text>
-          </TouchableOpacity>
+          </AdminChip>
         ))}
       </ScrollView>
 
       {loading && !refreshing ? (
-        <LoadingIndicator message="Fetching incoming orders..." />
+        <AdminLoadingState message="Fetching incoming orders…" />
       ) : orders.length === 0 ? (
         <EmptyState title={loadError ? 'Order queue unavailable' : 'No Orders'} message={loadError ? 'Check your connection and refresh. Existing order data is preserved when a refresh fails.' : 'No orders match the selected status filter.'} buttonTitle={loadError ? 'Refresh' : undefined} onButtonPress={loadError ? handleRefresh : undefined} />
       ) : (
         <FlatList
+          ref={orderListRef}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'none'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          onScrollToIndexFailed={({ index }) => setTimeout(() => orderListRef.current?.scrollToIndex({ index, viewPosition: 0.04, animated: true }), 180)}
           data={orders}
           ListHeaderComponent={loadError ? <Text style={styles.refreshWarning}>Could not refresh the queue. Showing the last loaded orders.</Text> : null}
           keyExtractor={(item) => item._id}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(24, (insets.bottom || 0) + 24) }]}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[COLORS.primary]} />
           }
           onEndReached={() => { if (hasMore && !loading) fetchAdminOrders({ quiet: true, append: true }); }}
           onEndReachedThreshold={0.45}
-          renderItem={({ item }) => (
+          renderItem={({ item }) => {
+            const nextAction = getAdminOrderAction(item);
+            const actionBusy = updatingOrderIds.has(item._id);
+            return (
             <View style={[styles.orderCard, isOrderOverdue(item, overdueMinutes, ageNow) && styles.orderCardOverdue]}>
               <View style={styles.cardHeader}>
-                <View>
+                <View style={styles.headerMain}>
                   <Text style={styles.orderNum}>Order #{item.orderNumber}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 4 }}>
+                  <View style={styles.customerMetaRow}>
                     <Text style={[
                       styles.orderTypeBadge,
                       item.orderType === 'DELIVERY' && styles.deliveryBadge,
@@ -367,11 +433,11 @@ export default function AdminOrdersScreen() {
                     ]}>
                       {item.orderType || 'TAKEAWAY'}
                     </Text>
-                    <Text style={styles.customerName}>
-                      👤 {item.customerSnapshot?.name || item.userId?.name || 'Student'} • 📱 {item.customerSnapshot?.phone || item.userId?.phone || 'N/A'}
+                    <Text style={styles.customerName} numberOfLines={2}>
+                      {item.customerSnapshot?.name || item.userId?.name || 'Student'} · {item.customerSnapshot?.phone || item.userId?.phone || 'No phone'}
                     </Text>
-                    {item.customerSnapshot?.email || item.userId?.email ? <Text style={styles.customerName}>{item.customerSnapshot?.email || item.userId?.email}</Text> : null}
                   </View>
+                  {item.customerSnapshot?.email || item.userId?.email ? <Text style={styles.customerEmail} numberOfLines={1}>{item.customerSnapshot?.email || item.userId?.email}</Text> : null}
                 </View>
                 <View style={styles.statusBadges}><StatusBadge status={item.orderStatus} /><StatusBadge status={item.paymentStatus || 'PENDING'} /></View>
               </View>
@@ -416,78 +482,86 @@ export default function AdminOrdersScreen() {
                 )}
 
                 {/* State Machine Action Controls */}
-                <View style={styles.actionsRow}>
+                <View style={styles.actionStack}>
                   {item.orderStatus === 'PLACED' && (
                     <>
-                      {(!['RAZORPAY', 'CASHFREE', 'UPI_QR'].includes(item.paymentMethod) || item.paymentStatus === 'SUCCESS') ? (
+                      {nextAction?.status === 'ACCEPTED' ? (
                         <Button
-                          title="Accept"
+                          title={nextAction.title}
                           onPress={() => handleUpdateStatus(item._id, 'ACCEPTED')}
-                          style={styles.actionBtnSmall}
+                          loading={actionBusy}
+                          disabled={actionBusy}
+                          style={styles.actionBtnFull}
                         />
                       ) : null}
                       {item.paymentStatus !== 'SUCCESS' ? (
                         rejectingOrderId === item._id ? <View style={styles.orderRejectForm}>
-                          <TextInput value={orderRejectReason} onChangeText={setOrderRejectReason} placeholder="Reason for rejecting this order" maxLength={500} accessibilityLabel="Required order rejection reason" style={styles.rejectReasonInput} />
-                          <View style={styles.actionsRow}>
-                            <Button title="Confirm reject" variant="danger" disabled={!orderRejectReason.trim()} onPress={() => handleUpdateStatus(item._id, 'REJECTED', orderRejectReason.trim())} style={styles.actionBtnSmall} />
-                            <Button title="Keep order" variant="outline" onPress={() => { setRejectingOrderId(''); setOrderRejectReason(''); }} style={styles.actionBtnSmall} />
+                          <TextInput ref={orderRejectInputRef} value={orderRejectReason} onChangeText={setOrderRejectReason} onFocus={() => { const index = orders.findIndex(order => String(order._id) === String(item._id)); if (index >= 0) orderListRef.current?.scrollToIndex({ index, viewPosition: 0.04, animated: true }); }} placeholder="Reason for rejecting this order" maxLength={500} accessibilityLabel="Required order rejection reason" style={styles.rejectReasonInput} returnKeyType="done" />
+                          <View style={styles.rejectActions}>
+                            <Button title="Confirm reject" variant="danger" disabled={!orderRejectReason.trim() || actionBusy} loading={actionBusy} onPress={() => handleUpdateStatus(item._id, 'REJECTED', orderRejectReason.trim())} style={styles.actionBtnFull} />
+                            <Button title="Keep order" variant="outline" disabled={actionBusy} onPress={() => { Keyboard.dismiss(); setRejectingOrderId(''); setOrderRejectReason(''); }} style={styles.actionBtnFull} />
                           </View>
-                        </View> : <Button title="Reject" variant="danger" onPress={() => handleRejectOrder(item._id)} style={styles.actionBtnSmall} />
-                      ) : <Text style={styles.paymentGateNote}>Paid orders cannot be rejected here because refunds are not enabled.</Text>}
+                        </View> : <Button title="Reject" variant="danger" onPress={() => handleRejectOrder(item._id)} style={styles.actionBtnFull} />
+                      ) : <Text style={styles.paidOrderNote}>Payment is verified. Accept this order to start kitchen preparation. Rejection is unavailable because refunds are not configured.</Text>}
                     </>
                   )}
 
-                  {item.orderStatus === 'ACCEPTED' && (
+                  {nextAction?.status === 'PREPARING' && (
                     <Button
-                      title="Start Preparing"
+                      title={nextAction.title}
                       onPress={() => handleUpdateStatus(item._id, 'PREPARING')}
+                      loading={actionBusy}
+                      disabled={actionBusy}
                       style={styles.actionBtnFull}
                     />
                   )}
 
-                  {item.orderStatus === 'PREPARING' && (
+                  {['READY', 'SERVED'].includes(nextAction?.status) && (
                     <Button
-                      title={item.orderType === 'DINE_IN' ? "Mark as Served" : "Mark Ready for Pickup"}
-                      onPress={() => handleUpdateStatus(item._id, item.orderType === 'DINE_IN' ? 'SERVED' : 'READY')}
+                      title={nextAction.title}
+                      onPress={() => handleUpdateStatus(item._id, nextAction.status)}
+                      loading={actionBusy}
+                      disabled={actionBusy}
                       style={styles.actionBtnFull}
                     />
                   )}
 
-                  {item.orderStatus === 'READY' && (
+                  {['COMPLETED', 'PICKED_UP'].includes(nextAction?.status) && (
                     <Button
-                      title={item.orderType === 'DELIVERY' ? "Mark Picked Up" : "Mark Completed"}
-                      onPress={() => handleUpdateStatus(item._id, item.orderType === 'DELIVERY' ? 'PICKED_UP' : 'COMPLETED')}
+                      title={nextAction.title}
+                      onPress={() => handleUpdateStatus(item._id, nextAction.status)}
+                      loading={actionBusy}
+                      disabled={actionBusy}
                       style={styles.actionBtnFull}
                     />
                   )}
 
-                  {item.orderStatus === 'PICKED_UP' && item.orderType === 'DELIVERY' && (
+                  {nextAction?.status === 'DELIVERED' && (
                     <Button
-                      title="Mark Delivered"
+                      title={nextAction.title}
                       onPress={() => handleUpdateStatus(item._id, 'DELIVERED')}
+                      loading={actionBusy}
+                      disabled={actionBusy}
                       style={styles.actionBtnFull}
                     />
                   )}
 
-                  {item.orderStatus === 'SERVED' && item.orderType === 'DINE_IN' && (
-                    <Button
-                      title="Mark Completed"
-                      onPress={() => handleUpdateStatus(item._id, 'COMPLETED')}
-                      style={styles.actionBtnFull}
-                    />
-                  )}
+                  {item.orderStatus === 'READY' && item.paymentStatus !== 'SUCCESS' ? <Text style={styles.paymentGateNote}>Confirm payment before completing or handing over this order. A ready, paid takeaway exposes its pickup QR in student Order Tracking.</Text> : null}
+                  {item.orderStatus === 'PLACED' && item.groupOrderId && item.paymentStatus !== 'SUCCESS' ? <Text style={styles.paymentGateNote}>Waiting for verified group contributions before this order can enter the kitchen.</Text> : null}
                 </View>
               </View>
             </View>
-          )}
+          );
+          }}
         />
       )}
     </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardContainer: { flex: 1 },
   newOrderAlert: { marginHorizontal: 14, marginTop: 9, padding: 12, borderRadius: 10, backgroundColor: '#FFF0DE', borderWidth: 1, borderColor: '#E7AA54' },
   newOrderAlertText: { color: '#784900', fontSize: 13, fontWeight: '900', textAlign: 'center' },
   upiQueue: { marginHorizontal: 14, marginTop: 8, padding: 14, backgroundColor: '#FFF8F3', borderRadius: 14, borderWidth: 1, borderColor: '#F2D7C8' },
@@ -539,8 +613,8 @@ const styles = StyleSheet.create({
   },
   orderCard: {
     backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 16,
+    padding: 14,
+    borderRadius: 15,
     borderWidth: 1,
     borderColor: COLORS.border,
     marginBottom: 14,
@@ -555,7 +629,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: 8,
   },
+  headerMain: { flex: 1, minWidth: 0 },
+  customerMetaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5, marginTop: 4, minWidth: 0 },
   orderNum: {
     fontSize: 16,
     fontWeight: '900',
@@ -577,12 +655,14 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.success,
   },
   customerName: {
-    fontSize: 13,
+    flexShrink: 1,
+    fontSize: 12,
     color: COLORS.textSecondary,
   },
-  statusBadges: { alignItems: 'flex-end', gap: 5 },
-  orderTime: { color: COLORS.textSecondary, fontSize: 11, marginTop: 5 },
-  orderAgeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  customerEmail: { color: COLORS.textSecondary, fontSize: 10, marginTop: 2, flexShrink: 1 },
+  statusBadges: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 5, maxWidth: '46%' },
+  orderTime: { color: COLORS.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 5, flexShrink: 1 },
+  orderAgeRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
   overdueBadge: { color: '#982D24', backgroundColor: '#FCE8E6', overflow: 'hidden', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 4, fontSize: 10, fontWeight: '900' },
   divider: {
     height: 1,
@@ -597,9 +677,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textPrimary,
     marginBottom: 2,
+    flexShrink: 1,
+    lineHeight: 18,
   },
   customizationText: { color: COLORS.textSecondary, fontSize: 11, marginLeft: 18, marginTop: 2 },
-  fulfillmentText: { color: COLORS.textSecondary, fontSize: 12, marginBottom: 8 },
+  fulfillmentText: { color: COLORS.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: 8, flexShrink: 1 },
   cardFooter: {
     marginTop: 4,
   },
@@ -616,16 +698,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   paymentGateNote: { color: COLORS.warning, fontSize: 12, lineHeight: 17, fontWeight: '700', marginBottom: 8 },
-  actionsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  actionBtnSmall: {
-    flex: 1,
-    minHeight: 48,
-  },
-  actionBtnFull: {
-    width: '100%',
-    minHeight: 48,
-  },
+  paidOrderNote: { color: '#376B45', backgroundColor: '#F0F8F1', borderRadius: 9, padding: 10, fontSize: 12, lineHeight: 17, marginTop: 2 },
+  actionStack: { width: '100%', alignSelf: 'stretch', flexDirection: 'column', gap: 8 },
+  rejectActions: { width: '100%', gap: 8 },
+  actionBtnSmall: { width: '100%', minWidth: 0, minHeight: 48, flexGrow: 0, flexShrink: 0, alignSelf: 'stretch' },
+  actionBtnFull: { width: '100%', minWidth: 0, minHeight: 48, flexGrow: 0, flexShrink: 0, alignSelf: 'stretch' },
 });

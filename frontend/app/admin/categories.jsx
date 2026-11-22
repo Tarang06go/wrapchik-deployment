@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, TextInput, Platform } from 'react-native';
 import { Plus, Trash2, Edit2 } from 'lucide-react-native';
 import Header from '../../components/common/Header';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
-import LoadingIndicator from '../../components/common/LoadingIndicator';
 import categoryService from '../../services/categoryService';
 import COLORS from '../../constants/colors';
+import { AdminFormModal, AdminLoadingState } from '../../components/admin/AdminPrimitives';
+import { confirmPlatformAction, showPlatformAlert } from '../../utils/platformDialogs';
 
 export default function AdminCategoriesScreen() {
   const [categories, setCategories] = useState([]);
@@ -78,30 +79,16 @@ export default function AdminCategoriesScreen() {
     } finally { setSaving(false); }
   };
 
-  const showMessage = (title, text) => typeof window !== 'undefined' ? window.alert(`${title}\n\n${text}`) : Alert.alert(title, text);
+  const showMessage = (title, text) => showPlatformAlert(Platform.OS, title, text, { nativeAlert: (...args) => Alert.alert(...args) });
 
   const deleteCategory = async id => {
     try { await categoryService.deleteCategory(id); setCategories(prev => prev.filter(c => c._id !== id)); }
     catch (e) { showMessage('Category not deleted', e.message || 'Deletion failed. Categories with products cannot be removed.'); }
   };
 
-  const handleDeleteCategory = (id) => {
-    if (typeof window !== 'undefined') {
-      if (confirm('Are you sure you want to delete this category?')) {
-        deleteCategory(id);
-      }
-    } else {
-      Alert.alert('Delete Category', 'Are you sure you want to delete this category?', [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteCategory(id);
-          },
-        },
-      ]);
-    }
+  const handleDeleteCategory = async (id) => {
+    const confirmed = await confirmPlatformAction({ platform: Platform.OS, title: 'Delete Category', message: 'Are you sure you want to delete this category?', confirmLabel: 'Delete', confirmStyle: 'destructive', browserWindow: Platform.OS === 'web' && typeof window !== 'undefined' ? window : undefined, nativeAlert: (...args) => Alert.alert(...args) });
+    if (confirmed) await deleteCategory(id);
   };
 
   return (
@@ -115,7 +102,7 @@ export default function AdminCategoriesScreen() {
       {!!error && <TouchableOpacity onPress={fetchCategories} style={styles.error}><Text style={styles.errorText}>{error} · Tap to retry</Text></TouchableOpacity>}
 
       {loading ? (
-        <LoadingIndicator message="Fetching categories..." />
+        <AdminLoadingState message="Fetching categories…" />
       ) : (
         <FlatList
           data={categories}
@@ -123,8 +110,8 @@ export default function AdminCategoriesScreen() {
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => (
             <View style={styles.catCard}>
-              <View><Text style={styles.catName}>{item.name}</Text><Text style={styles.orderText}>Menu order {item.displayOrder ?? 0}</Text></View>
-              <View style={{flexDirection: 'row', gap: 12}}>
+              <View style={styles.catInfo}><Text style={styles.catName} numberOfLines={1}>{item.name}</Text><Text style={styles.orderText}>Menu order {item.displayOrder ?? 0}</Text></View>
+              <View style={styles.categoryActions}>
                 <TouchableOpacity onPress={() => openEditModal(item)} style={styles.deleteBtn}>
                   <Edit2 size={18} color={COLORS.primary} />
                 </TouchableOpacity>
@@ -137,23 +124,11 @@ export default function AdminCategoriesScreen() {
         />
       )}
 
-      <Modal visible={modalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{editingId ? 'Edit Category' : 'Add Category'}</Text>
-            <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={{ maxHeight: '72%' }}>
-            <Input label="Category Name" value={name} onChangeText={setName} placeholder="e.g. Desserts" />
-            <Input label="Image URL" value={imageUrl} onChangeText={setImageUrl} placeholder="https://..." />
-            <Text style={styles.fieldLabel}>Display order</Text><TextInput value={displayOrder} onChangeText={setDisplayOrder} keyboardType="number-pad" style={styles.orderInput} />
-            </ScrollView>
-
-            <View style={styles.modalActions}>
-              <Button title="Cancel" variant="outline" onPress={() => setModalVisible(false)} style={styles.modalBtn} />
-              <Button title={saving ? 'Saving…' : editingId ? 'Save Changes' : 'Save Category'} onPress={handleSaveCategory} disabled={saving} style={styles.modalBtn} />
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <AdminFormModal visible={modalVisible} onClose={() => setModalVisible(false)} onSave={handleSaveCategory} saving={saving} title={editingId ? 'Edit category' : 'Add category'} saveTitle={editingId ? 'Save changes' : 'Save category'}>
+        <Input label="Category Name" value={name} onChangeText={setName} placeholder="e.g. Desserts" />
+        <Input label="Image URL" value={imageUrl} onChangeText={setImageUrl} placeholder="https://..." />
+        <Text style={styles.fieldLabel}>Display order</Text><TextInput value={displayOrder} onChangeText={setDisplayOrder} keyboardType="number-pad" style={styles.orderInput} />
+      </AdminFormModal>
     </View>
   );
 }
@@ -187,6 +162,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
     backgroundColor: '#FFFFFF',
     padding: 16,
     borderRadius: 14,
@@ -194,6 +171,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     marginBottom: 10,
   },
+  catInfo: { flex: 1, minWidth: 0 }, categoryActions: { flexDirection: 'row', gap: 8 },
   catName: {
     fontSize: 16,
     fontWeight: '700',
@@ -201,7 +179,7 @@ const styles = StyleSheet.create({
   },
   orderText: { color: COLORS.textSecondary, fontSize: 11, marginTop: 3 }, fieldLabel: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700', marginTop: 6, marginBottom: 5 }, orderInput: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, padding: 10, color: COLORS.textPrimary },
   deleteBtn: {
-    padding: 4,
+    width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: '#FFF8F4',
   },
   modalOverlay: {
     flex: 1,

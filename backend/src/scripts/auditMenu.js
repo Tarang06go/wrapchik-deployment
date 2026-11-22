@@ -12,7 +12,7 @@ const main = async () => {
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000, readPreference: 'secondaryPreferred', autoIndex: false });
   try {
     const [products, categories] = await Promise.all([
-      Product.find().select('_id name price imageUrl categoryId').lean(),
+      Product.find().select('_id name price imageUrl categoryId isVeg').lean(),
       Category.find().select('_id name').lean(),
     ]);
     let referenceItems = null;

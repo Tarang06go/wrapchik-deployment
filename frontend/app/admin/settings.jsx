@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
 import Header from '../../components/common/Header';
 import Button from '../../components/common/Button';
-import LoadingIndicator from '../../components/common/LoadingIndicator';
 import api from '../../services/api';
 import COLORS from '../../constants/colors';
+import { AdminLoadingState } from '../../components/admin/AdminPrimitives';
+import ErrorState from '../../components/common/ErrorState';
+import { validateLoyaltyDraft, validateNumericText } from '../../utils/adminNumericForm.cjs';
 
 const ToggleSwitch = ({ value, onValueChange, label }) => (
   <View style={styles.toggleRow}>
@@ -28,6 +30,8 @@ export default function AdminSettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [feedbackError, setFeedbackError] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [validationErrors, setValidationErrors] = useState({});
 
   useEffect(() => {
     fetchSettings();
@@ -44,20 +48,52 @@ export default function AdminSettingsScreen() {
           ? saved.promoBanners
           : hasLegacyBanner ? [{ ...defaultPromoBanner(), ...saved.promoBanner }] : [];
         setSettings({ ...saved, promoBanners });
+        setLoadError('');
       }
     } catch (e) {
       console.error('[Admin Settings Fetch Error]:', e);
-      Alert.alert('Error', 'Failed to fetch settings');
+      setLoadError(e.message || 'Could not load outlet settings.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleSave = async () => {
+    const errors = {};
+    const payload = { ...settings };
+    const numericRules = {
+      pickupSlotCapacity: { label: 'Orders per pickup slot', min: 1, max: 100, integer: true },
+      estimatedPrepMinutes: { label: 'Preparation time', min: 5, max: 240, integer: true },
+      orderOverdueMinutes: { label: 'Order overdue threshold', min: 1, max: 240, integer: true },
+      deliveryFee: { label: 'Delivery fee', min: 0, max: 90071992547409, integer: false },
+      groupMinimumOrderValue: { label: 'Share a Meal minimum subtotal', min: 0, max: 100000, integer: false },
+    };
+    for (const [key, rules] of Object.entries(numericRules)) {
+      const parsed = validateNumericText(settings[key], rules);
+      if (parsed.error) errors[key] = parsed.error;
+      else payload[key] = parsed.value;
+    }
+    const loyaltyResult = validateLoyaltyDraft(settings.loyalty || defaultLoyalty);
+    for (const [key, message] of Object.entries(loyaltyResult.errors)) errors[`loyalty.${key}`] = message;
+    if (loyaltyResult.policy) payload.loyalty = loyaltyResult.policy;
+
+    const banners = (settings.promoBanners || []).map((banner, index) => {
+      const key = `promoBanners.${index}.sortOrder`;
+      const parsed = validateNumericText(banner.sortOrder ?? index, { label: `Banner ${index + 1} carousel order`, min: 0, max: 4, integer: true });
+      if (parsed.error) errors[key] = parsed.error;
+      return parsed.error ? banner : { ...banner, sortOrder: parsed.value };
+    });
+    payload.promoBanners = banners;
+    setValidationErrors(errors);
+    if (Object.keys(errors).length) {
+      setFeedback('Please correct the highlighted fields before saving.');
+      setFeedbackError(true);
+      return;
+    }
     try {
       setSaving(true);
-      const firstBanner = settings.promoBanners?.[0];
-      await api.put('/settings', { ...settings, promoBanner: firstBanner ? {
+      const firstBanner = payload.promoBanners?.[0];
+      await api.put('/settings', { ...payload, promoBanner: firstBanner ? {
         enabled: firstBanner.enabled === true, title: firstBanner.title || '', message: firstBanner.message || '',
         ctaLabel: firstBanner.ctaLabel || '', ctaRoute: firstBanner.ctaRoute || '/(tabs)/menu',
       } : settings.promoBanner });
@@ -74,29 +110,69 @@ export default function AdminSettingsScreen() {
     const promoBanners = [...(settings.promoBanners || [])];
     promoBanners[index] = { ...promoBanners[index], ...updates };
     setSettings({ ...settings, promoBanners });
+    if (updates.sortOrder !== undefined) setValidationErrors(previous => ({ ...previous, [`promoBanners.${index}.sortOrder`]: undefined }));
   };
   const addPromoBanner = () => {
     const banners = settings.promoBanners || [];
     if (banners.length < 5) setSettings({ ...settings, promoBanners: [...banners, defaultPromoBanner(banners.length)] });
   };
-  const updateLoyalty = (updates) => setSettings({ ...settings, loyalty: { ...defaultLoyalty, ...settings.loyalty, ...updates } });
+  const updateLoyalty = (updates) => {
+    setSettings({ ...settings, loyalty: { ...defaultLoyalty, ...settings.loyalty, ...updates } });
+    setValidationErrors(previous => {
+      const next = { ...previous };
+      for (const key of Object.keys(updates)) {
+        delete next[`loyalty.${key}`];
+        if (key === 'tiers') for (const errorKey of Object.keys(next)) if (errorKey.startsWith('loyalty.tier.') || errorKey === 'loyalty.tiers') delete next[errorKey];
+      }
+      return next;
+    });
+  };
   const updateLoyaltyTier = (index, updates) => {
     const tiers = [...(settings.loyalty?.tiers || [])];
     tiers[index] = { ...tiers[index], ...updates };
     updateLoyalty({ tiers });
   };
 
+  const numericField = (label, value, onChangeText, keyboardType, errorKey, accessibilityLabel = label) => (
+    <View style={styles.numericField} key={errorKey}>
+      <Text style={styles.inputLabel}>{label}</Text>
+      <TextInput
+        style={[styles.input, validationErrors[errorKey] && styles.inputInvalid]}
+        value={value == null ? '' : String(value)}
+        onChangeText={nextValue => {
+          onChangeText(nextValue);
+          setValidationErrors(previous => ({ ...previous, [errorKey]: undefined }));
+        }}
+        keyboardType={keyboardType}
+        accessibilityLabel={accessibilityLabel}
+        accessibilityHint={validationErrors[errorKey] || undefined}
+      />
+      {validationErrors[errorKey] ? <Text accessibilityRole="alert" style={styles.fieldError}>{validationErrors[errorKey]}</Text> : null}
+    </View>
+  );
+
+  const toggleLoyalty = enabled => {
+    if (!enabled) { updateLoyalty({ enabled: false }); return; }
+    const result = validateLoyaltyDraft({ ...settings.loyalty, enabled: true });
+    const errors = Object.fromEntries(Object.entries(result.errors).map(([key, message]) => [`loyalty.${key}`, message]));
+    if (Object.keys(errors).length) {
+      setValidationErrors(previous => ({ ...previous, ...errors }));
+      setFeedback('Complete the earning, redemption, and zero-point starting tier before enabling rewards.');
+      setFeedbackError(true);
+      return;
+    }
+    updateLoyalty({ enabled: true });
+  };
+
   if (loading) {
-    return <LoadingIndicator message="Loading settings..." />;
+    return <AdminLoadingState message="Loading settings…" />;
   }
 
   if (!settings) {
     return (
       <View style={styles.container}>
         <Header title="Restaurant Settings" showBack showCart={false} />
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <Text>Failed to load settings.</Text>
-        </View>
+        <ErrorState title="Settings unavailable" message={loadError || 'The outlet settings could not be loaded.'} onRetry={fetchSettings} />
       </View>
     );
   }
@@ -143,28 +219,30 @@ export default function AdminSettingsScreen() {
             <Text style={styles.inputLabel}>Active until · ISO-8601, optional</Text>
             <TextInput style={styles.input} value={banner.activeUntil ? String(banner.activeUntil) : ''} onChangeText={val => updatePromoBanner(index, { activeUntil: val })} placeholder="2026-11-30T23:00:00+05:30" autoCapitalize="none" />
             <Text style={styles.inputLabel}>Carousel order (0–4)</Text>
-            <TextInput style={styles.input} value={String(banner.sortOrder ?? index)} onChangeText={val => updatePromoBanner(index, { sortOrder: val === '' ? '' : Number(val) })} keyboardType="number-pad" />
+            {numericField('Carousel order (0–4)', banner.sortOrder ?? index, val => updatePromoBanner(index, { sortOrder: val }), 'number-pad', `promoBanners.${index}.sortOrder`)}
           </View>)}
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Student loyalty rewards</Text>
           <Text style={styles.paymentHelp}>Rewards are off by default. Configure the outlet-approved earning value, redemption value and lifetime tiers before enabling. Points apply only to verified, paid, completed individual orders; group orders are excluded.</Text>
-          <ToggleSwitch label="Enable loyalty rewards" value={settings.loyalty?.enabled === true} onValueChange={enabled => updateLoyalty({ enabled })} />
-          <Text style={styles.inputLabel}>Eligible spend block (₹)</Text>
-          <TextInput style={styles.input} value={String(settings.loyalty?.earnEveryRupees ?? 0)} onChangeText={value => updateLoyalty({ earnEveryRupees: value === '' ? '' : Number(value) })} keyboardType="number-pad" />
-          <Text style={styles.inputLabel}>Points earned per spend block</Text>
-          <TextInput style={styles.input} value={String(settings.loyalty?.pointsPerStep ?? 0)} onChangeText={value => updateLoyalty({ pointsPerStep: value === '' ? '' : Number(value) })} keyboardType="number-pad" />
-          <Text style={styles.inputLabel}>Value per point (paise)</Text>
-          <TextInput style={styles.input} value={String(settings.loyalty?.paisePerPoint ?? 0)} onChangeText={value => updateLoyalty({ paisePerPoint: value === '' ? '' : Number(value) })} keyboardType="number-pad" />
-          <Text style={styles.inputLabel}>Minimum redemption points</Text>
-          <TextInput style={styles.input} value={String(settings.loyalty?.minimumRedemptionPoints ?? 0)} onChangeText={value => updateLoyalty({ minimumRedemptionPoints: value === '' ? '' : Number(value) })} keyboardType="number-pad" />
-          <Text style={styles.inputLabel}>Maximum item subtotal redeemed (%) · max 50</Text>
-          <TextInput style={styles.input} value={String(settings.loyalty?.maxRedemptionPercent ?? 0)} onChangeText={value => updateLoyalty({ maxRedemptionPercent: value === '' ? '' : Number(value) })} keyboardType="number-pad" />
+          <ToggleSwitch label="Enable loyalty rewards" value={settings.loyalty?.enabled === true} onValueChange={toggleLoyalty} />
+          {numericField('Eligible spend block (₹)', settings.loyalty?.earnEveryRupees, value => updateLoyalty({ earnEveryRupees: value }), 'number-pad', 'loyalty.earnEveryRupees')}
+          {numericField('Points earned per spend block', settings.loyalty?.pointsPerStep, value => updateLoyalty({ pointsPerStep: value }), 'number-pad', 'loyalty.pointsPerStep')}
+          {numericField('Value per point (paise)', settings.loyalty?.paisePerPoint, value => updateLoyalty({ paisePerPoint: value }), 'number-pad', 'loyalty.paisePerPoint')}
+          {numericField('Minimum redemption points', settings.loyalty?.minimumRedemptionPoints, value => updateLoyalty({ minimumRedemptionPoints: value }), 'number-pad', 'loyalty.minimumRedemptionPoints')}
+          {numericField('Maximum item subtotal redeemed (%) · max 50', settings.loyalty?.maxRedemptionPercent, value => updateLoyalty({ maxRedemptionPercent: value }), 'number-pad', 'loyalty.maxRedemptionPercent')}
           <Text style={styles.inputLabel}>Lifetime tiers · first tier must start at 0 points</Text>
           {(settings.loyalty?.tiers || []).map((tier, index) => <View key={index} style={styles.tierRow}>
-            <TextInput style={[styles.input, styles.tierName]} value={tier.name} onChangeText={name => updateLoyaltyTier(index, { name })} maxLength={24} placeholder="Tier name" />
-            <TextInput style={[styles.input, styles.tierPoints]} value={String(tier.minimumLifetimePoints)} onChangeText={value => updateLoyaltyTier(index, { minimumLifetimePoints: value === '' ? '' : Number(value) })} keyboardType="number-pad" placeholder="Min points" />
+            <View style={styles.tierNameColumn}>
+              <TextInput style={[styles.input, validationErrors[`loyalty.tier.${index}.name`] && styles.inputInvalid]} value={tier.name} onChangeText={name => updateLoyaltyTier(index, { name })} maxLength={24} placeholder="Tier name" accessibilityLabel={`Tier ${index + 1} name`} />
+              {validationErrors[`loyalty.tier.${index}.name`] ? <Text accessibilityRole="alert" style={styles.fieldError}>{validationErrors[`loyalty.tier.${index}.name`]}</Text> : null}
+            </View>
+            <View style={styles.tierPoints}>
+              <Text style={styles.inputLabel}>Starts at points</Text>
+              <TextInput style={[styles.input, styles.tierPointInput, validationErrors[`loyalty.tier.${index}.minimumLifetimePoints`] && styles.inputInvalid]} value={tier.minimumLifetimePoints == null ? '' : String(tier.minimumLifetimePoints)} onChangeText={value => updateLoyaltyTier(index, { minimumLifetimePoints: value })} keyboardType="number-pad" placeholder="0" accessibilityLabel={`Tier ${index + 1} starting points`} accessibilityHint={validationErrors[`loyalty.tier.${index}.minimumLifetimePoints`] || undefined} />
+              {validationErrors[`loyalty.tier.${index}.minimumLifetimePoints`] ? <Text accessibilityRole="alert" style={styles.fieldError}>{validationErrors[`loyalty.tier.${index}.minimumLifetimePoints`]}</Text> : null}
+            </View>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove tier ${tier.name || index + 1}`} onPress={() => updateLoyalty({ tiers: settings.loyalty.tiers.filter((_, tierIndex) => tierIndex !== index) })} style={styles.removeTier}><Text style={styles.removeTierText}>Remove</Text></TouchableOpacity>
           </View>)}
           {(settings.loyalty?.tiers || []).length < 5 ? <TouchableOpacity onPress={() => updateLoyalty({ tiers: [...(settings.loyalty?.tiers || []), { name: '', minimumLifetimePoints: 0 }] })} style={styles.addTier}><Text style={styles.addTierText}>Add tier</Text></TouchableOpacity> : null}
@@ -172,6 +250,16 @@ export default function AdminSettingsScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Toggles</Text>
+          <Text style={styles.inputLabel}>Campus pickup point (optional)</Text>
+          <TextInput
+            style={styles.input}
+            value={settings.pickupLocation || ''}
+            onChangeText={value => setSettings({ ...settings, pickupLocation: value })}
+            maxLength={200}
+            placeholder="e.g. Wrapchik Counter, SAC Ground Floor"
+            accessibilityLabel="Campus pickup point address"
+          />
+          <Text style={styles.paymentHelp}>Customers see this point and its map link only after you configure it. If left blank, order snapshots retain the existing TIET counter address.</Text>
           <ToggleSwitch 
             label="Accepting Orders" 
             value={settings.acceptingOrders} 
@@ -197,7 +285,7 @@ export default function AdminSettingsScreen() {
             <Text style={styles.inputLabel}>Pickup slot interval (minutes)</Text>
             <View style={styles.statusRow}>{[15, 30, 60].map(value => <TouchableOpacity key={value} onPress={() => setSettings({ ...settings, pickupSlotMinutes: value })} style={[styles.statusBtn, Number(settings.pickupSlotMinutes) === value && styles.statusBtnActive]}><Text style={[styles.statusBtnText, Number(settings.pickupSlotMinutes) === value && styles.statusBtnTextActive]}>{value}</Text></TouchableOpacity>)}</View>
             <Text style={[styles.inputLabel, { marginTop: 14 }]}>Orders per pickup slot</Text>
-            <TextInput style={styles.input} value={String(settings.pickupSlotCapacity ?? 4)} onChangeText={val => setSettings({ ...settings, pickupSlotCapacity: val === '' ? '' : Number(val) })} keyboardType="number-pad" />
+            {numericField('Orders per pickup slot', settings.pickupSlotCapacity, val => setSettings({ ...settings, pickupSlotCapacity: val }), 'number-pad', 'pickupSlotCapacity')}
           </> : null}
         </View>
 
@@ -220,36 +308,15 @@ export default function AdminSettingsScreen() {
           />
 
           <Text style={styles.inputLabel}>Est. Prep Minutes</Text>
-          <TextInput
-            style={styles.input}
-            value={settings.estimatedPrepMinutes?.toString()}
-            onChangeText={(val) => setSettings({...settings, estimatedPrepMinutes: val === '' ? '' : Number(val)})}
-            keyboardType="number-pad"
-          />
+          {numericField('Estimated prep minutes', settings.estimatedPrepMinutes, val => setSettings({ ...settings, estimatedPrepMinutes: val }), 'number-pad', 'estimatedPrepMinutes')}
 
           <Text style={styles.inputLabel}>Highlight active orders after (minutes)</Text>
-          <TextInput
-            style={styles.input}
-            value={String(settings.orderOverdueMinutes ?? 30)}
-            onChangeText={(val) => setSettings({...settings, orderOverdueMinutes: val === '' ? '' : Number(val)})}
-            keyboardType="number-pad"
-            accessibilityLabel="Overdue order highlight threshold in minutes"
-          />
+          {numericField('Highlight active orders after (minutes)', settings.orderOverdueMinutes ?? 30, val => setSettings({ ...settings, orderOverdueMinutes: val }), 'number-pad', 'orderOverdueMinutes', 'Overdue order highlight threshold in minutes')}
           
           <Text style={styles.inputLabel}>Delivery Fee (₹)</Text>
-          <TextInput
-            style={styles.input}
-            value={settings.deliveryFee?.toString()}
-            onChangeText={(val) => setSettings({...settings, deliveryFee: val === '' ? '' : Number(val)})}
-            keyboardType="decimal-pad"
-          />
+          {numericField('Delivery fee (₹)', settings.deliveryFee, val => setSettings({ ...settings, deliveryFee: val }), 'decimal-pad', 'deliveryFee')}
           <Text style={styles.inputLabel}>Share a Meal minimum subtotal (₹, 0 disables)</Text>
-          <TextInput
-            style={styles.input}
-            value={String(settings.groupMinimumOrderValue ?? 0)}
-            onChangeText={(val) => setSettings({...settings, groupMinimumOrderValue: val === '' ? '' : Number(val)})}
-            keyboardType="decimal-pad"
-          />
+          {numericField('Share a Meal minimum subtotal (₹, 0 disables)', settings.groupMinimumOrderValue ?? 0, val => setSettings({ ...settings, groupMinimumOrderValue: val }), 'decimal-pad', 'groupMinimumOrderValue')}
         </View>
 
         <View style={styles.section}>
@@ -300,7 +367,7 @@ const styles = StyleSheet.create({
   bannerEditor: { marginTop: 12, padding: 13, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#FFFCFA' },
   bannerEditorTitle: { color: COLORS.textPrimary, fontSize: 14, fontWeight: '900' },
   paymentHelp: { color: COLORS.textSecondary, fontSize: 12, lineHeight: 18, marginTop: -8 },
-  tierRow: { flexDirection: 'row', gap: 6, alignItems: 'center' }, tierName: { flex: 1 }, tierPoints: { width: 92 }, removeTier: { paddingHorizontal: 4, minHeight: 44, justifyContent: 'center' }, removeTierText: { color: COLORS.danger, fontSize: 11, fontWeight: '800' }, addTier: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }, addTierText: { color: COLORS.primary, fontWeight: '900' },
+  tierRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginBottom: 10 }, tierNameColumn: { flex: 1, minWidth: 90 }, tierPoints: { width: 124 }, tierPointInput: { marginBottom: 8 }, removeTier: { paddingHorizontal: 4, minHeight: 44, justifyContent: 'center' }, removeTierText: { color: COLORS.danger, fontSize: 11, fontWeight: '800' }, addTier: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }, addTierText: { color: COLORS.primary, fontWeight: '900' },
   
   // Toggle Styles
   toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
@@ -324,6 +391,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     color: COLORS.textPrimary,
   },
+  numericField: { marginBottom: 3 }, inputInvalid: { borderColor: COLORS.danger }, fieldError: { color: COLORS.danger, fontSize: 12, lineHeight: 16, marginTop: -11, marginBottom: 12, fontWeight: '700' },
 
   // Busy Status Styles
   statusRow: { flexDirection: 'row', gap: 8 },

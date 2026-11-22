@@ -62,6 +62,9 @@ const updateSettings = async (req, res, next) => {
     for (const key of ['upiId', 'upiPayeeName', 'upiQrImageUrl']) {
       if (body[key] !== undefined && (typeof body[key] !== 'string' || body[key].length > (key === 'upiQrImageUrl' ? 1000 : 120))) return res.status(400).json({ success: false, message: `${key} must be a string within the allowed length` });
     }
+    if (body.pickupLocation !== undefined && (typeof body.pickupLocation !== 'string' || body.pickupLocation.trim().length > 200)) {
+      return res.status(400).json({ success: false, message: 'Pickup location must be a string within 200 characters.' });
+    }
     if (body.upiId !== undefined && body.upiId && !isValidUpiId(body.upiId)) return res.status(400).json({ success: false, message: 'Enter a valid UPI ID.' });
     if (body.upiQrImageUrl) {
       try {
@@ -93,9 +96,9 @@ const updateSettings = async (req, res, next) => {
     const proposedOpen = body.openTime ?? settings.openTime;
     const proposedClose = body.closeTime ?? settings.closeTime;
     if (proposedOpen >= proposedClose) return res.status(400).json({ success: false, message: 'Closing time must be later than opening time' });
-    const allowedFields = ['acceptingOrders', 'openTime', 'closeTime', 'busyStatus', 'deliveryEnabled', 'dineInEnabled', 'takeawayEnabled', 'estimatedPrepMinutes', 'orderOverdueMinutes', 'deliveryFee', 'groupMinimumOrderValue', 'scheduledPickupEnabled', 'pickupSlotMinutes', 'pickupSlotCapacity', 'upiId', 'upiPayeeName', 'upiQrImageUrl', 'upiEnabled', 'cashEnabled', 'promoBanner', 'promoBanners', 'loyalty'];
+    const allowedFields = ['acceptingOrders', 'openTime', 'closeTime', 'busyStatus', 'deliveryEnabled', 'dineInEnabled', 'takeawayEnabled', 'estimatedPrepMinutes', 'orderOverdueMinutes', 'deliveryFee', 'groupMinimumOrderValue', 'scheduledPickupEnabled', 'pickupSlotMinutes', 'pickupSlotCapacity', 'pickupLocation', 'upiId', 'upiPayeeName', 'upiQrImageUrl', 'upiEnabled', 'cashEnabled', 'promoBanner', 'promoBanners', 'loyalty'];
     for (const field of allowedFields) {
-      if (body[field] !== undefined) settings[field] = body[field];
+      if (body[field] !== undefined) settings[field] = field === 'pickupLocation' ? body[field].trim() : body[field];
     }
     await settings.save();
     res.json({ success: true, message: 'Restaurant settings updated', settings });

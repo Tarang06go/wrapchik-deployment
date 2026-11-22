@@ -4,7 +4,7 @@ import { Search, X } from 'lucide-react-native';
 import COLORS from '../../constants/colors';
 import THEME from '../../constants/theme';
 
-const SearchBar = ({ value, onChangeText, onClear, onSubmitEditing, onFocus, onBlur, placeholder = 'Search wraps, burgers and more', style }) => {
+const SearchBar = ({ value, onChangeText, onClear, onSubmitEditing, onFocus, onBlur, onKeyPress, placeholder = 'Search wraps, burgers and more', style }) => {
   return (
     <View style={[styles.container, style]}>
       <View style={styles.iconWrap}>
@@ -16,12 +16,14 @@ const SearchBar = ({ value, onChangeText, onClear, onSubmitEditing, onFocus, onB
         onSubmitEditing={onSubmitEditing}
         onFocus={onFocus}
         onBlur={onBlur}
+        onKeyPress={onKeyPress}
         placeholder={placeholder}
         placeholderTextColor="#9CA3AF"
         style={styles.input}
         accessibilityLabel="Search the menu"
         accessibilityRole="search"
         returnKeyType="search"
+        blurOnSubmit={false}
         autoCapitalize="none"
         autoCorrect={false}
         showSoftInputOnFocus

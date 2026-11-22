@@ -1,7 +1,7 @@
 const path = require('node:path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const mongoose = require('mongoose');
-const models = ['Order', 'Product', 'Payment', 'GroupOrder'].map(name => require(`../models/${name}`));
+const models = ['Order', 'Product', 'Payment', 'GroupOrder', 'GroupActivity'].map(name => require(`../models/${name}`));
 
 const sameObject = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const optionMatches = (actual, expected) => ['unique', 'sparse', 'partialFilterExpression'].every(key =>

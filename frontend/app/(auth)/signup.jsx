@@ -1,14 +1,11 @@
-import React, {
-  useState,
-  useContext,
-  useEffect,
-} from 'react';
+import React, { useCallback, useState, useContext, useEffect, useRef } from 'react';
 
 import {
   Text,
   StyleSheet,
   ScrollView,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
 } from 'react-native';
 
@@ -18,11 +15,20 @@ import { AuthContext } from '../../context/AuthContext';
 
 import Input from '../../components/common/Input';
 import Button from '../../components/common/Button';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import COLORS from '../../constants/colors';
 
 export default function SignupScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const scrollRef = useRef(null);
+  const focusedInputRef = useRef(null);
+  const nameInputRef = useRef(null);
+  const emailInputRef = useRef(null);
+  const phoneInputRef = useRef(null);
+  const passwordInputRef = useRef(null);
+  const confirmPasswordInputRef = useRef(null);
 
   const {
     register,
@@ -46,6 +52,26 @@ export default function SignupScreen() {
 
   const [errors, setErrors] =
     useState({});
+
+  const scrollFocusedInputIntoView = useCallback((input = focusedInputRef.current) => {
+    if (!input) return;
+    requestAnimationFrame(() => {
+      const responder = scrollRef.current?.getScrollResponder?.() || scrollRef.current;
+      responder?.scrollResponderScrollNativeHandleToKeyboard?.(input, 24, true);
+    });
+  }, []);
+
+  const handleInputFocus = useCallback((inputRef) => {
+    focusedInputRef.current = inputRef.current;
+    scrollFocusedInputIntoView(inputRef.current);
+  }, [scrollFocusedInputIntoView]);
+
+  useEffect(() => {
+    const subscription = Keyboard.addListener('keyboardDidShow', () => {
+      scrollFocusedInputIntoView(focusedInputRef.current);
+    });
+    return () => subscription.remove();
+  }, [scrollFocusedInputIntoView]);
 
   useEffect(() => {
     if (__DEV__) console.log('[Wrapchik] signup screen mounted');
@@ -123,10 +149,11 @@ export default function SignupScreen() {
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <ScrollView
+      ref={scrollRef}
       style={styles.scroll}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 18) + 12, paddingBottom: Math.max(insets.bottom, 18) + 20 }]}
       keyboardShouldPersistTaps="handled"
-      keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'none'}
+      keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
     >
       <Text style={styles.brand}>
         WRAPCHIK
@@ -142,14 +169,19 @@ export default function SignupScreen() {
       </Text>
 
       <Input
+        ref={nameInputRef}
         label="Full Name"
         value={name}
         onChangeText={setName}
         placeholder="Your name"
         error={errors.name}
+        returnKeyType="next"
+        blurOnSubmit={false}
+        onSubmitEditing={() => emailInputRef.current?.focus()}
       />
 
       <Input
+        ref={emailInputRef}
         label="Email"
         value={email}
         onChangeText={setEmail}
@@ -157,18 +189,26 @@ export default function SignupScreen() {
         keyboardType="email-address"
         autoCapitalize="none"
         error={errors.email}
+        returnKeyType="next"
+        blurOnSubmit={false}
+        onSubmitEditing={() => phoneInputRef.current?.focus()}
       />
 
       <Input
+        ref={phoneInputRef}
         label="Phone"
         value={phone}
         onChangeText={setPhone}
         placeholder="9876543210"
         keyboardType="phone-pad"
         error={errors.phone}
+        returnKeyType="next"
+        blurOnSubmit={false}
+        onSubmitEditing={() => passwordInputRef.current?.focus()}
       />
 
       <Input
+        ref={passwordInputRef}
         label="Password"
         value={password}
         onChangeText={setPassword}
@@ -176,9 +216,14 @@ export default function SignupScreen() {
         secureTextEntry
         showPasswordToggle
         error={errors.password}
+        onFocus={() => handleInputFocus(passwordInputRef)}
+        returnKeyType="next"
+        blurOnSubmit={false}
+        onSubmitEditing={() => confirmPasswordInputRef.current?.focus()}
       />
 
       <Input
+        ref={confirmPasswordInputRef}
         label="Confirm Password"
         value={confirmPassword}
         onChangeText={setConfirmPassword}
@@ -186,11 +231,14 @@ export default function SignupScreen() {
         secureTextEntry
         showPasswordToggle
         error={errors.confirmPassword}
+        onFocus={() => handleInputFocus(confirmPasswordInputRef)}
+        returnKeyType="done"
+        onSubmitEditing={() => { Keyboard.dismiss(); void handleSignup(); }}
       />
 
       <Button
         title="Create Account"
-        onPress={handleSignup}
+        onPress={() => { Keyboard.dismiss(); void handleSignup(); }}
         loading={isLoading}
         style={{
           marginTop: 10,
@@ -231,7 +279,9 @@ const styles =
 
     content: {
       padding: 24,
-      paddingTop: 70,
+      paddingTop: 24,
+      paddingBottom: 36,
+      flexGrow: 1,
     },
 
     brand: {

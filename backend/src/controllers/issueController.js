@@ -8,14 +8,23 @@ const createIssue = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'orderId, category, and description are required' });
     }
     if (description.trim().length > 1000) return res.status(400).json({ success: false, message: 'Description must be 1,000 characters or fewer.' });
+    if (!['WRONG_ITEM', 'MISSING_ITEM', 'QUALITY', 'LATE', 'OTHER'].includes(category)) return res.status(400).json({ success: false, message: 'Select a valid issue category.' });
     const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
-    if (order.userId.toString() !== req.user._id.toString()) {
+    let authorized = order.userId.toString() === req.user._id.toString();
+    if (!authorized && order.groupOrderId) {
+      authorized = Boolean(await require('../models/GroupOrder').exists({
+        _id: order.groupOrderId,
+        members: { $elemMatch: { userId: req.user._id, status: 'JOINED' } },
+      }));
+    }
+    if (!authorized) {
       return res.status(403).json({ success: false, message: 'You can only report issues on your own orders' });
     }
     const terminalStatuses = ['COMPLETED', 'DELIVERED', 'SERVED'];
-    if (!terminalStatuses.includes(order.orderStatus)) {
-      return res.status(400).json({ success: false, message: 'Can only report issues on completed orders' });
+    const activeDelayStatuses = ['ACCEPTED', 'PREPARING', 'READY'];
+    if (!terminalStatuses.includes(order.orderStatus) && !(category === 'LATE' && activeDelayStatuses.includes(order.orderStatus))) {
+      return res.status(400).json({ success: false, message: 'Item and quality issues are for completed orders. Delay reports are available after the kitchen accepts an order.' });
     }
     const issue = await Issue.create({ orderId, userId: req.user._id, category, description: description.trim() });
     res.status(201).json({ success: true, message: 'Issue reported successfully', issue });

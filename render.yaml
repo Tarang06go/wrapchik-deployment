@@ -1,0 +1,54 @@
+# Single-instance HTTPS API blueprint for demo/staging. Render supplies TLS and PORT.
+# Process-local rate limits and group expiry require one instance until a shared store is configured.
+services:
+  - type: web
+    name: wrapchik-api
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    numInstances: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      - key: LOCAL_OTP_ENABLED
+        value: "false"
+      - key: SEED_SAMPLE_CATALOGUE
+        value: "false"
+      - key: SEED_DEMO_ACCOUNTS
+        value: "false"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MONGO_URI
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      # Render Free blocks SMTP ports. Use the existing Resend HTTPS provider here;
+      # leave SMTP_USER and SMTP_APP_PASSWORD unset on this service.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+
+  - type: web
+    name: wrapchik-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && node scripts/validate-api-url.cjs --profile production && npm run export:web
+    staticPublishPath: dist
+    envVars:
+      - key: EXPO_PUBLIC_API_URL
+        sync: false
+      - key: EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

@@ -1,0 +1,81 @@
+name: Manually publish EAS Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: EAS channel to update
+        type: choice
+        options:
+          - preview
+          - production
+        required: true
+      native_base_ref:
+        description: Git commit that produced the installed native build for this channel
+        type: string
+        required: true
+      message:
+        description: Update description
+        type: string
+        required: true
+      approve_publish:
+        description: Explicitly approve publishing after checks
+        type: choice
+        options:
+          - no
+          - yes
+        default: no
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: inputs.approve_publish == 'yes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      EAS_CHANNEL: ${{ inputs.channel }}
+      NATIVE_BASE_REF: ${{ inputs.native_base_ref }}
+      UPDATE_MESSAGE: ${{ inputs.message }}
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - name: Require Expo token
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "Repository secret EXPO_TOKEN is required; no update was published."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run backend and frontend regression suites
+        run: |
+          npm --prefix backend ci
+          npm --prefix backend test
+          npm --prefix frontend test
+          npm --prefix frontend run check:routes
+      - name: Check native compatibility baseline
+        working-directory: frontend
+        run: node scripts/check-native-runtime.cjs --base="$NATIVE_BASE_REF"
+      - name: Scan source for high-confidence secrets
+        run: node scripts/check-secrets.cjs
+      - name: Validate selected EAS API URL without logging it
+        working-directory: frontend
+        run: |
+          ENV_FILE="$RUNNER_TEMP/wrapchik-eas.env"
+          trap 'rm -f "$ENV_FILE"' EXIT
+          npx eas-cli@latest env:pull --environment "$EAS_CHANNEL" --path "$ENV_FILE" --non-interactive
+          node scripts/validate-api-url.cjs --profile "$EAS_CHANNEL" --env-file "$ENV_FILE"
+      - name: Publish approved channel update
+        working-directory: frontend
+        run: npx eas-cli@latest update --channel "$EAS_CHANNEL" --message "$UPDATE_MESSAGE" --environment "$EAS_CHANNEL" --non-interactive

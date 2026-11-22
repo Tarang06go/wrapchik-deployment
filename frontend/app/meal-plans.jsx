@@ -12,9 +12,10 @@ import COLORS from '../constants/colors';
 import safeStorage from '../services/safeStorage';
 import productService from '../services/productService';
 import { createMealPlanSnapshot, getMealReminderDate } from '../utils/mealPlanCore';
+import { showPlatformAlert } from '../utils/platformDialogs';
 
 const storageKeyFor = userId => `wrapchik_meal_plans:${userId}`;
-const message = (title, body) => Platform.OS === 'web' ? window.alert(`${title}\n\n${body}`) : Alert.alert(title, body);
+const message = (title, body) => showPlatformAlert(Platform.OS, title, body, { nativeAlert: (...args) => Alert.alert(...args) });
 
 export default function MealPlansScreen() {
   const router = useRouter();

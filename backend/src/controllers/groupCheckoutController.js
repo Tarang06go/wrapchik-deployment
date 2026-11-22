@@ -17,6 +17,7 @@ const { prepareGroupContributions } = require('../utils/groupCheckoutPricing');
 const { hashUpiReference, upiReferenceLookup } = require('../utils/upiReference');
 const { updateOrderPaymentStatus } = require('./paymentController');
 const { serializeGroupForMember } = require('./groupOrderController');
+const { recordGroupActivity } = require('../utils/groupActivity');
 
 const paise = (rupees) => Math.round(Number(rupees) * 100);
 const money = (amountPaise) => Number(amountPaise) / 100;
@@ -61,6 +62,7 @@ const repriceCart = async (group) => {
     group.status = 'OPEN';
     group.lockedAt = null;
     await group.save();
+    await recordGroupActivity({ groupId: group._id, type: 'GROUP_STATUS_CHANGED', message: 'The shared cart was repriced and returned to review.' });
     socketManager.emitGroupUpdate(group);
   }
   return { changed, verifiedItems };
@@ -105,6 +107,7 @@ const sendGroupOrder = async (req, res, group, order, statusCode = 201) => {
   group.status = 'ORDERED';
   await order.populate('userId', 'name email phone');
   await group.save();
+  await recordGroupActivity({ groupId: group._id, actorId: req.user._id, actorName: req.user.name, type: 'ORDER_PLACED', message: 'Placed the group order. Contributions are waiting for outlet review.' });
   try { socketManager.emitGroupUpdate(group); } catch { /* Stored group state is authoritative; clients re-fetch on reconnect. */ }
   try { socketManager.emitOrderUpdate(order); } catch { /* Stored order state is authoritative; clients re-fetch on reconnect. */ }
   const { createNotification } = require('./notificationController');
@@ -200,7 +203,7 @@ const checkoutGroup = async (req, res, next) => {
         couponCode: couponReservation?.code,
         discountAmount,
         paymentMethod,
-        pickupLocation: group.orderType === 'TAKEAWAY' ? 'Wrapchik Counter, SAC Ground Floor' : undefined,
+        pickupLocation: group.orderType === 'TAKEAWAY' ? require('../utils/pickupLocation').resolvePickupLocation(settings.pickupLocation) : undefined,
         pickupTimeSlot: group.orderType === 'TAKEAWAY' ? '15-20 Mins' : undefined,
         paymentStatus: 'PENDING',
         orderStatus: 'PLACED',
@@ -432,6 +435,7 @@ const submitContributionReference = async (req, res, next) => {
     }
     contribution.paymentId = payment._id;
     await group.save();
+    await recordGroupActivity({ groupId: group._id, actorId: req.user._id, actorName: req.user.name, type: action === 'VERIFY' ? 'CONTRIBUTION_VERIFIED' : 'PAYMENT_CLAIM_REJECTED', message: action === 'VERIFY' ? 'An outlet administrator verified a group contribution.' : 'An outlet administrator rejected a UPI claim; the member may review and resubmit.' });
     socketManager.emitGroupUpdate(group);
     await require('./notificationController').notifyAdmins(
       `Group payment claim · order #${order.orderNumber}`,
@@ -492,6 +496,7 @@ const reconcileGroupPayment = async (req, res, next) => {
     if (order.paymentStatus !== 'SUCCESS') await updateOrderPaymentStatus(order, 'SUCCESS');
     group.paymentVerifiedAt = group.paymentVerifiedAt || new Date();
     await group.save();
+    await recordGroupActivity({ groupId: group._id, actorId: req.user._id, actorName: req.user.name, type: 'GROUP_PAYMENT_VERIFIED', message: 'The outlet reconciled all verified contributions to the order.' });
     socketManager.emitGroupUpdate(group);
     return res.json({ success: true, orderId: order._id, paymentStatus: 'SUCCESS', message: 'The verified member contributions now reconcile to the group order total.' });
   } catch (error) {
@@ -577,6 +582,7 @@ const reviewGroupContribution = async (req, res, next) => {
       await updateOrderPaymentStatus(order, 'SUCCESS');
       group.paymentVerifiedAt = new Date();
       await group.save();
+      await recordGroupActivity({ groupId: group._id, actorId: req.user._id, actorName: req.user.name, type: 'GROUP_PAYMENT_VERIFIED', message: 'The outlet verified all group contributions.' });
       socketManager.emitGroupUpdate(group);
     }
     return res.json({ success: true, contribution, fullyPaid: group.contributions.every((row) => row.status === 'SUCCESS'), message: action === 'VERIFY' ? 'Contribution verified by the outlet.' : 'UPI claim rejected; the student can submit a new reference.' });

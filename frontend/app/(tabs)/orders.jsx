@@ -14,6 +14,8 @@ import COLORS from '../../constants/colors';
 import { SocketContext } from '../../context/SocketContext';
 import { orderFilterFromParam } from '../../utils/orderFilterCore.mjs';
 
+const ORDER_PAGE_SIZE = 20;
+
 export default function OrdersScreen() {
   const router = useRouter();
   const { addToCart } = useContext(CartContext);
@@ -27,35 +29,79 @@ export default function OrdersScreen() {
   const [filter, setFilter] = useState(routeFilter); // ALL, ACTIVE, COMPLETED
   const [loadError, setLoadError] = useState(false);
   const [reordering, setReordering] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const lastSocketEventRef = useRef('');
+  const pageOffsetRef = useRef(0);
+  const hasMoreRef = useRef(false);
+  const loadingMoreRef = useRef(false);
+  const requestSequenceRef = useRef(0);
+  const lastRouteFilterRef = useRef(routeFilter);
 
-  useEffect(() => setFilter(routeFilter), [routeFilter]);
+  useEffect(() => {
+    if (lastRouteFilterRef.current !== routeFilter) {
+      lastRouteFilterRef.current = routeFilter;
+      setOrders([]);
+      pageOffsetRef.current = 0;
+      hasMoreRef.current = false;
+      setHasMore(false);
+      setFilter(routeFilter);
+    }
+  }, [routeFilter]);
 
-  const fetchOrders = useCallback(async ({ quiet = false } = {}) => {
+  const fetchOrders = useCallback(async ({ quiet = false, append = false } = {}) => {
+    if (append && (loadingMoreRef.current || !hasMoreRef.current)) return;
+    const requestId = ++requestSequenceRef.current;
+    const skip = append ? pageOffsetRef.current : 0;
+    const limit = quiet && !append ? Math.max(ORDER_PAGE_SIZE, Math.min(pageOffsetRef.current, 100)) : ORDER_PAGE_SIZE;
+    if (append) {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    } else if (!quiet) {
+      pageOffsetRef.current = 0;
+      hasMoreRef.current = false;
+      setHasMore(false);
+      setLoading(true);
+    }
     try {
-      if (!quiet) setLoading(true);
-      const res = await orderService.getMyOrders();
+      const params = { limit, skip };
+      if (filter !== 'ALL') params.statusGroup = filter;
+      const res = await orderService.getMyOrders(params);
       if (!res?.success || !Array.isArray(res.orders)) throw new Error('Order history could not be loaded.');
-      setOrders(res.orders);
+      if (requestId !== requestSequenceRef.current) return;
+      setOrders(current => {
+        if (!append) return res.orders;
+        const existingIds = new Set(current.map(order => order._id));
+        return [...current, ...res.orders.filter(order => !existingIds.has(order._id))];
+      });
+      pageOffsetRef.current = skip + res.orders.length;
+      hasMoreRef.current = Boolean(res.hasMore);
+      setHasMore(hasMoreRef.current);
       setLoadError(false);
     } catch (e) {
+      if (requestId !== requestSequenceRef.current) return;
       console.warn('[OrdersScreen Error]:', e);
       setLoadError(true);
     } finally {
-      if (!quiet) setLoading(false);
-      setRefreshing(false);
+      if (requestId === requestSequenceRef.current) {
+        if (!quiet && !append) setLoading(false);
+        setRefreshing(false);
+      }
+      if (append) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
-  }, []);
+  }, [filter]);
 
   useFocusEffect(useCallback(() => {
     if (!authLoading && user) {
-      setOrders([]);
-      fetchOrders();
+      void fetchOrders();
     }
   }, [authLoading, user?._id, fetchOrders]));
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (!socket || !user) return undefined;
     const refresh = (event) => {
       if (event?.orderId && event.orderStatus && event.paymentStatus) {
@@ -69,7 +115,7 @@ export default function OrdersScreen() {
     socket.on('connect', refresh);
     socket.on('refresh_authoritative_state', refresh);
     return () => { socket.off('order_updated', refresh); socket.off('connect', refresh); socket.off('refresh_authoritative_state', refresh); };
-  }, [socket, user?._id, fetchOrders]);
+  }, [socket, user?._id, fetchOrders]));
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -128,7 +174,14 @@ export default function OrdersScreen() {
         {['ALL', 'ACTIVE', 'COMPLETED'].map((tab) => (
           <TouchableOpacity
             key={tab}
-            onPress={() => setFilter(tab)}
+            onPress={() => {
+              if (filter === tab) return;
+              setOrders([]);
+              pageOffsetRef.current = 0;
+              hasMoreRef.current = false;
+              setHasMore(false);
+              setFilter(tab);
+            }}
             accessibilityRole="tab"
             accessibilityState={{ selected: filter === tab }}
             style={[styles.filterTab, filter === tab && styles.filterTabActive]}
@@ -146,7 +199,7 @@ export default function OrdersScreen() {
         <EmptyState title="Sign in to view your orders" message="Your order status and receipts are saved to your Wrapchik account." buttonTitle="Sign in" onButtonPress={() => router.push({ pathname: '/(auth)/login', params: { returnTo: 'orders' } })} />
       ) : loadError && !loading && orders.length === 0 ? (
         <ErrorState title="Could not load your orders" message="Check your connection and retry. Your order history has not been cleared." onRetry={handleRefresh} retrying={refreshing} />
-      ) : loading && !refreshing ? (
+      ) : loading && !refreshing && orders.length === 0 ? (
         <LoadingIndicator message="Loading your order history..." />
       ) : filteredOrders.length === 0 ? (
         <EmptyState
@@ -163,6 +216,9 @@ export default function OrdersScreen() {
           renderItem={({ item }) => (
             <View style={styles.orderCardWrapper}>
               <OrderCard order={item} />
+              {item.groupOrderId ? <View style={styles.reorderBtnContainer}><Button title="View group details" variant="outline" onPress={() => router.push({ pathname: '/my-group/[id]', params: { id: String(item.groupOrderId?._id || item.groupOrderId) } })} style={styles.reorderBtn} /></View> : null}
+              {item.orderStatus === 'PLACED' && item.paymentMethod === 'UPI_QR' && item.paymentStatus !== 'SUCCESS' && !(item.paymentId?.status === 'PENDING' && item.paymentId?.upiTransactionReference) ? <View style={styles.reorderBtnContainer}><Button title={item.paymentStatus === 'FAILED' ? 'Retry payment for this order' : 'Complete payment'} onPress={() => router.push({ pathname: '/payment', params: { orderId: item._id, orderNumber: item.orderNumber } })} style={styles.reorderBtn} /></View> : null}
+              {item.paymentId?.status === 'PENDING' && item.paymentId?.upiTransactionReference ? <Text style={styles.pendingPayment}>UPI reference submitted · awaiting outlet verification. Do not pay again.</Text> : null}
               {['COMPLETED', 'DELIVERED', 'SERVED'].includes(item.orderStatus) && (
                 <View style={styles.reorderBtnContainer}>
                   <Button
@@ -175,6 +231,13 @@ export default function OrdersScreen() {
               )}
             </View>
           )}
+          onEndReached={() => { if (hasMoreRef.current) void fetchOrders({ append: true }); }}
+          onEndReachedThreshold={0.45}
+          initialNumToRender={5}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          updateCellsBatchingPeriod={40}
+          ListFooterComponent={loadingMore ? <LoadingIndicator message="Loading more orders…" /> : null}
           contentContainerStyle={styles.listContent}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[COLORS.primary]} />
@@ -201,10 +264,11 @@ const styles = StyleSheet.create({
   reorderBtn: {
     paddingVertical: 8,
   },
+  pendingPayment: { marginTop: -8, marginBottom: 10, marginHorizontal: 10, color: COLORS.warning, fontSize: 12, lineHeight: 17, fontWeight: '700' },
   filterContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 8,
     gap: 8,
   },
   filterTab: {

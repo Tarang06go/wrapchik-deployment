@@ -2,7 +2,7 @@
   "expo": {
     "name": "Wrapchik",
     "slug": "wrapchik",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -27,6 +27,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-updates",
       [
         "expo-splash-screen",
         {
@@ -60,12 +61,18 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+          "usesCleartextTraffic": false
           }
         }
       ]
     ],
     "scheme": "wrapchik",
+    "updates": {
+      "url": "https://u.expo.dev/4a057aed-99c4-439e-bd49-b465197abaf7"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "extra": {
       "router": {},
       "eas": {

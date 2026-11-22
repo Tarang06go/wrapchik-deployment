@@ -7,10 +7,28 @@ const { minimumGroupSubtotalPaise, meetsGroupMinimum } = require('../src/utils/g
 const response = () => ({ statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
 const settingsFixture = () => ({
   acceptingOrders: true, openTime: '09:00', closeTime: '23:00', upiEnabled: false, upiId: '', upiPayeeName: '', cashEnabled: true,
+  pickupLocation: '',
   promoBanner: { enabled: false, title: '', message: '', ctaLabel: '', ctaRoute: '/(tabs)/menu' },
   promoBanners: [],
   saves: 0,
   async save() { this.saves += 1; },
+});
+
+test('pickup point is optional, admin-configurable and length-limited', async () => {
+  assert.equal(new RestaurantSettings().pickupLocation, '');
+  assert.equal(RestaurantSettings.schema.path('pickupLocation').options.maxlength, 200);
+  const original = RestaurantSettings.getSettings;
+  const settings = settingsFixture();
+  RestaurantSettings.getSettings = async () => settings;
+  try {
+    const accepted = response();
+    await updateSettings({ body: { pickupLocation: '  SAC Ground Floor, TIET  ' } }, accepted, error => { throw error; });
+    assert.equal(accepted.statusCode, 200);
+    assert.equal(settings.pickupLocation, 'SAC Ground Floor, TIET');
+    const rejected = response();
+    await updateSettings({ body: { pickupLocation: 'x'.repeat(201) } }, rejected, error => { throw error; });
+    assert.equal(rejected.statusCode, 400);
+  } finally { RestaurantSettings.getSettings = original; }
 });
 
 test('promotion schema is additive, disabled by default and limited to app-owned routes', () => {

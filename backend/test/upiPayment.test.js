@@ -143,6 +143,31 @@ test('UPI cannot enter kitchen acceptance while unpaid', async () => {
   }
 });
 
+test('admin cannot complete or hand off any unpaid order state', async () => {
+  const originalFindById = Order.findById;
+  const originalFindOneAndUpdate = Order.findOneAndUpdate;
+  let updateAttempted = false;
+  const pendingOrder = {
+    _id: '64b000000000000000000001', orderStatus: 'READY', orderType: 'TAKEAWAY',
+    paymentMethod: 'COUNTER', paymentStatus: 'PENDING', userId: { name: 'Student' },
+  };
+  Order.findById = () => ({ populate: async () => pendingOrder });
+  Order.findOneAndUpdate = () => { updateAttempted = true; throw new Error('Must not update an unpaid order'); };
+  try {
+    const { updateOrderStatus } = require('../src/controllers/adminController');
+    for (const status of ['COMPLETED', 'PICKED_UP', 'DELIVERED', 'SERVED']) {
+      const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+      await updateOrderStatus({ params: { id: pendingOrder._id }, body: { status } }, res, error => { throw error; });
+      assert.equal(res.statusCode, 409, `${status} must be blocked until payment is confirmed`);
+      assert.match(res.body.message, /confirm payment/i);
+    }
+    assert.equal(updateAttempted, false);
+  } finally {
+    Order.findById = originalFindById;
+    Order.findOneAndUpdate = originalFindOneAndUpdate;
+  }
+});
+
 test('admin rejection requires a non-empty reason before any order transition', async () => {
   const originalFindById = Order.findById;
   const pendingOrder = { _id: '64b000000000000000000001', orderStatus: 'PLACED', orderType: 'TAKEAWAY', paymentMethod: 'COUNTER', paymentStatus: 'PENDING', userId: { name: 'Student' } };

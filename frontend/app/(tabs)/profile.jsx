@@ -157,7 +157,7 @@ export default function ProfileScreen() {
               </>
             ) : null}
             {profileError ? <Text accessibilityRole="alert" style={styles.profileError}>{profileError}</Text> : null}
-            {profileNotice ? <Text accessibilityRole="status" style={styles.profileNotice}>{profileNotice}</Text> : null}
+            {profileNotice ? <Text accessibilityLiveRegion="polite" style={styles.profileNotice}>{profileNotice}</Text> : null}
           </View>
         ) : null}
 

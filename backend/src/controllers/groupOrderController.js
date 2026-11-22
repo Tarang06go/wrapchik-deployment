@@ -5,6 +5,8 @@ const socketManager = require('../config/socketManager');
 const { ACTIVE_MEMBER_COUNT, countActiveMembers, chooseNextLeader, isGroupExpired } = require('../utils/groupOrderRules');
 const { calculateVerifiedItems } = require('../utils/orderPricing');
 const { allocatePaise, equalAllocations, acceptancesComplete, userKey } = require('../utils/groupItemAllocation');
+const { summarizeGroup } = require('../utils/groupSummary');
+const { recordGroupActivity } = require('../utils/groupActivity');
 
 const GROUP_LIFETIME_MS = 2 * 60 * 60 * 1000;
 const membershipActiveFilter = (userId) => ({ members: { $elemMatch: { userId, status: 'JOINED' } } });
@@ -89,15 +91,20 @@ const closeExpiredGroup = async (group) => {
     { $set: { status: 'CANCELLED', cancelledAt: now }, $inc: { __v: 1 } },
     { new: true }
   );
-  if (closed) emitUpdate(closed);
+  if (closed) {
+    await recordGroupActivity({ groupId: closed._id, type: 'GROUP_EXPIRED', message: 'The group invite expired and the group was closed.' });
+    emitUpdate(closed);
+  }
   return closed || await GroupOrder.findById(group._id) || group;
 };
 
 const createGroup = async (req, res, next) => {
   try {
     const { orderType = 'TAKEAWAY', hostel, roomNumber, tableId, maxMembers = 8 } = req.body || {};
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     const memberLimit = Number(maxMembers);
     if (!['TAKEAWAY', 'DELIVERY', 'DINE_IN'].includes(orderType)) return res.status(400).json({ success: false, message: 'Invalid group order type.' });
+    if (name.length > 48) return res.status(400).json({ success: false, message: 'Group name must be 48 characters or fewer.' });
     if (!Number.isInteger(memberLimit) || memberLimit < 2 || memberLimit > 8) return res.status(400).json({ success: false, message: 'Group size must be from 2 to 8 members.' });
     if (orderType === 'DELIVERY' && (typeof hostel !== 'string' || !hostel.trim() || hostel.trim().length > 120 || typeof roomNumber !== 'string' || !roomNumber.trim() || roomNumber.trim().length > 32)) {
       return res.status(400).json({ success: false, message: 'A valid hostel and room are required for a delivery group.' });
@@ -110,6 +117,7 @@ const createGroup = async (req, res, next) => {
       try {
         group = await GroupOrder.create({
           groupCode,
+          name: name || 'Share a Meal',
           leaderId: req.user._id,
           members: [{ userId: req.user._id, name: req.user.name, status: 'JOINED', joinedAt: new Date() }],
           orderType,
@@ -124,6 +132,7 @@ const createGroup = async (req, res, next) => {
       }
     }
     if (!group) return res.status(503).json({ success: false, message: 'Could not create an invite code. Try again.' });
+    await recordGroupActivity({ groupId: group._id, actorId: req.user._id, actorName: req.user.name, type: 'GROUP_CREATED', message: 'Created this Share a Meal group.' });
     res.status(201).json({ success: true, group });
   } catch (error) { next(error); }
 };
@@ -146,6 +155,7 @@ const joinGroup = async (req, res, next) => {
       { new: true, runValidators: true }
     );
     if (group) {
+      await recordGroupActivity({ groupId: group._id, actorId: req.user._id, actorName: req.user.name, type: 'MEMBER_JOINED', message: 'Joined the group.' });
       emitUpdate(group);
       return res.json({ success: true, group });
     }
@@ -161,6 +171,63 @@ const joinGroup = async (req, res, next) => {
     if (countActiveMembers(refreshed.members) >= refreshed.maxMembers) return res.status(409).json({ success: false, message: 'This group is full.' });
     return res.status(409).json({ success: false, message: 'The group changed while you were joining. Refresh and try again.' });
   } catch (error) { next(error); }
+};
+
+const getMyGroups = async (req, res, next) => {
+  try {
+    const query = req.query || {};
+    const hasPageParams = query.limit != null || query.skip != null;
+    let pageLimit = null;
+    let skip = 0;
+    if (hasPageParams) {
+      pageLimit = query.limit == null ? 20 : Number(query.limit);
+      skip = query.skip == null ? 0 : Number(query.skip);
+      if (!Number.isSafeInteger(pageLimit) || pageLimit < 1 || pageLimit > 100
+        || !Number.isSafeInteger(skip) || skip < 0 || skip > 1_000_000) {
+        return res.status(400).json({ success: false, message: 'Invalid group page request.' });
+      }
+    }
+    let groups = GroupOrder.find({
+      $or: [{ leaderId: req.user._id }, { members: { $elemMatch: { userId: req.user._id } } }],
+    }).select('name groupCode leaderId members.userId members.status maxMembers status orderId checkoutMode paymentVerifiedAt contributions.userId contributions.status expiresAt createdAt updatedAt')
+      .sort({ updatedAt: -1 });
+    if (hasPageParams) groups.skip(skip).limit(pageLimit + 1);
+    let rows = await groups.populate('orderId', 'orderNumber orderStatus paymentStatus').lean();
+    const hasMore = hasPageParams && rows.length > pageLimit;
+    if (hasMore) rows = rows.slice(0, pageLimit);
+    return res.json({
+      success: true,
+      count: rows.length,
+      groups: rows.map(group => summarizeGroup(group, req.user._id)),
+      ...(hasPageParams ? { hasMore } : {}),
+    });
+  } catch (error) { return next(error); }
+};
+
+const getGroupSummary = async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ success: false, message: 'A valid group is required.' });
+    const group = await GroupOrder.findOne({ _id: req.params.id, $or: [
+      { leaderId: req.user._id }, { members: { $elemMatch: { userId: req.user._id } } },
+    ] }).select('name groupCode leaderId members.userId members.status maxMembers status orderId checkoutMode paymentVerifiedAt contributions.userId contributions.status expiresAt createdAt updatedAt')
+      .populate('orderId', 'orderNumber orderStatus paymentStatus')
+      .lean();
+    if (!group) return res.status(404).json({ success: false, message: 'Group not found for this account.' });
+    return res.json({ success: true, group: summarizeGroup(group, req.user._id) });
+  } catch (error) { return next(error); }
+};
+
+const getGroupActivity = async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ success: false, message: 'A valid group is required.' });
+    const member = await GroupOrder.exists({ _id: req.params.id, $or: [
+      { leaderId: req.user._id }, { members: { $elemMatch: { userId: req.user._id } } },
+    ] });
+    if (!member) return res.status(404).json({ success: false, message: 'Group not found for this account.' });
+    const events = await require('../models/GroupActivity').find({ groupId: req.params.id })
+      .select('type actorName message createdAt').sort({ createdAt: -1 }).limit(40).lean();
+    return res.json({ success: true, activity: events });
+  } catch (error) { return next(error); }
 };
 
 const getGroupDetails = async (req, res, next) => {
@@ -206,6 +273,7 @@ const lockGroup = async (req, res, next) => {
       { new: true, runValidators: true }
     );
     if (!group) return res.status(409).json({ success: false, message: 'The group changed before it could be locked. Refresh and try again.' });
+    await recordGroupActivity({ groupId: group._id, actorId: req.user._id, actorName: req.user.name, type: 'GROUP_LOCKED', message: 'Locked the invite after member review.' });
     emitUpdate(group);
     return res.json({ success: true, group, message: 'Group locked. New members can no longer join.' });
   } catch (error) { next(error); }
@@ -255,6 +323,8 @@ const leaveGroup = async (req, res, next) => {
     if (!group) return res.status(409).json({ success: false, message: 'Group membership changed. Refresh and try again.' });
     removeMemberFromCart(group, userId);
     await group.save();
+    await recordGroupActivity({ groupId: group._id, actorId: userId, actorName: req.user.name, type: 'MEMBER_LEFT', message: isLeader && !nextLeader ? 'Left the group; the empty group was closed.' : 'Left the group.' });
+    if (group.status === 'CANCELLED') await recordGroupActivity({ groupId: group._id, actorId: userId, actorName: req.user.name, type: 'GROUP_CANCELLED', message: 'The group was closed after its last member left.' });
     emitUpdate(group);
     return res.json({ success: true, message: 'Left the group successfully.', group });
   } catch (error) { next(error); }
@@ -285,6 +355,7 @@ const removeGroupMember = async (req, res, next) => {
     if (!group) return res.status(409).json({ success: false, message: 'That member is no longer in this open group.' });
     removeMemberFromCart(group, req.params.userId);
     await group.save();
+    await recordGroupActivity({ groupId: group._id, actorId: req.user._id, actorName: req.user.name, type: 'MEMBER_REMOVED', message: 'Removed a member from the group.' });
     emitUpdate(group);
     return res.json({ success: true, message: 'Member removed from the group.', group });
   } catch (error) { next(error); }
@@ -323,6 +394,7 @@ const addGroupItem = async (req, res, next) => {
       revision: 1,
     });
     await result.group.save();
+    await recordGroupActivity({ groupId: result.group._id, actorId: req.user._id, actorName: req.user.name, type: 'CART_ITEM_ADDED', message: `Added ${verified.name} to the shared cart.` });
     emitUpdate(result.group);
     return res.status(201).json({ success: true, group: result.group });
   } catch (error) {
@@ -351,6 +423,7 @@ const updateGroupItem = async (req, res, next) => {
       acceptedAt: item.shareMode === 'SOLO' ? new Date() : null,
     }));
     await result.group.save();
+    await recordGroupActivity({ groupId: result.group._id, actorId: req.user._id, actorName: req.user.name, type: 'CART_ITEM_UPDATED', message: `Updated ${item.name} in the shared cart.` });
     emitUpdate(result.group);
     return res.json({ success: true, group: result.group });
   } catch (error) {
@@ -383,6 +456,7 @@ const configureGroupItemSharing = async (req, res, next) => {
     item.allocations = priced.map((row) => ({ ...row, acceptedRevision: null, acceptedAt: null }));
     invalidateItemAcceptances(item);
     await result.group.save();
+    await recordGroupActivity({ groupId: result.group._id, actorId: req.user._id, actorName: req.user.name, type: 'SHARE_CHANGED', message: `Updated sharing for ${item.name}.` });
     emitUpdate(result.group);
     return res.json({ success: true, group: result.group });
   } catch (error) {
@@ -404,6 +478,7 @@ const acceptGroupItemShare = async (req, res, next) => {
     allocation.acceptedRevision = item.revision;
     allocation.acceptedAt = new Date();
     await result.group.save();
+    await recordGroupActivity({ groupId: result.group._id, actorId: req.user._id, actorName: req.user.name, type: 'SHARE_ACCEPTED', message: `Accepted a share of ${item.name}.` });
     emitUpdate(result.group);
     const amounts = allocatePaise(item.itemTotalPaise, item.allocations);
     return res.json({ success: true, group: result.group, yourSharePaise: amounts.find((row) => row.userId === userKey(req.user._id))?.amountPaise });
@@ -422,6 +497,7 @@ const removeGroupItem = async (req, res, next) => {
     if (userKey(item.selectedBy) !== userKey(req.user._id)) return res.status(403).json({ success: false, message: 'You can remove only the items you added.' });
     item.deleteOne();
     await result.group.save();
+    await recordGroupActivity({ groupId: result.group._id, actorId: req.user._id, actorName: req.user.name, type: 'CART_ITEM_REMOVED', message: `Removed ${item.name} from the shared cart.` });
     emitUpdate(result.group);
     return res.json({ success: true, group: result.group });
   } catch (error) {
@@ -431,7 +507,7 @@ const removeGroupItem = async (req, res, next) => {
 };
 
 module.exports = {
-  createGroup, joinGroup, getGroupDetails, lockGroup, leaveGroup, removeGroupMember,
+  createGroup, joinGroup, getMyGroups, getGroupSummary, getGroupActivity, getGroupDetails, lockGroup, leaveGroup, removeGroupMember,
   addGroupItem, updateGroupItem, configureGroupItemSharing, acceptGroupItemShare, removeGroupItem,
   closeExpiredGroup, serializeGroupForMember,
 };

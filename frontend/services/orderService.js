@@ -5,14 +5,14 @@ const orderService = {
     return api.post('/orders', orderPayload);
   },
 
-  getMyOrders: () => {
-    return api.get('/orders/my');
-  },
+  getMyOrders: (params) => api.get('/orders/my', params ? { params } : undefined),
+  getHomeOrderSummary: () => api.get('/orders/my', { params: { homeSummary: 'true' } }),
+  getReadyPickupOrders: () => api.get('/orders/my', { params: { readyPickup: 'true' } }),
 
   getOrderById: (id) => {
     return api.get(`/orders/${id}`);
   },
-  getPickupQr: (id) => api.post(`/orders/${id}/pickup-qr`),
+  getPickupQr: (id, groupOrderId = null) => api.post(`/orders/${id}/pickup-qr`, groupOrderId ? { groupOrderId: String(groupOrderId?._id || groupOrderId) } : {}),
 
   cancelOrder: (id) => {
     return api.post(`/orders/${id}/cancel`);

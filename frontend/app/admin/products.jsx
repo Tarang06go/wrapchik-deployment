@@ -1,16 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Switch, TouchableOpacity, Alert, Modal, ScrollView, TextInput } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Switch, TouchableOpacity, Alert, ScrollView, TextInput, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Plus, Edit2, Trash2 } from 'lucide-react-native';
 import Header from '../../components/common/Header';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import ProductImage from '../../components/common/ProductImage';
-import LoadingIndicator from '../../components/common/LoadingIndicator';
 import productService from '../../services/productService';
 import categoryService from '../../services/categoryService';
 import COLORS from '../../constants/colors';
+import { AdminFormModal, AdminLoadingState } from '../../components/admin/AdminPrimitives';
+import { confirmPlatformAction, showPlatformAlert } from '../../utils/platformDialogs';
+import { validateNumericText } from '../../utils/adminNumericForm.cjs';
 
 export default function AdminProductsScreen() {
+  const router = useRouter();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +36,7 @@ export default function AdminProductsScreen() {
   const [description, setDescription] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [stock, setStock] = useState('');
+  const [formErrors, setFormErrors] = useState({});
 
   useEffect(() => {
     fetchProducts();
@@ -64,7 +69,7 @@ export default function AdminProductsScreen() {
     } finally { setBusyId(null); }
   };
 
-  const showMessage = (title, message) => typeof window !== 'undefined' ? window.alert(`${title}\n\n${message}`) : Alert.alert(title, message);
+  const showMessage = (title, message) => showPlatformAlert(Platform.OS, title, message, { nativeAlert: (...args) => Alert.alert(...args) });
 
   const deleteProduct = async id => {
     setBusyId(id);
@@ -75,23 +80,9 @@ export default function AdminProductsScreen() {
     finally { setBusyId(null); }
   };
 
-  const handleDeleteProduct = (id) => {
-    if (typeof window !== 'undefined') {
-      if (confirm('Are you sure you want to delete this product from menu?')) {
-        deleteProduct(id);
-      }
-    } else {
-      Alert.alert('Delete Product', 'Are you sure you want to delete this product from menu?', [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteProduct(id);
-          },
-        },
-      ]);
-    }
+  const handleDeleteProduct = async (id) => {
+    const confirmed = await confirmPlatformAction({ platform: Platform.OS, title: 'Delete Product', message: 'Are you sure you want to delete this product from menu?', confirmLabel: 'Delete', confirmStyle: 'destructive', browserWindow: Platform.OS === 'web' && typeof window !== 'undefined' ? window : undefined, nativeAlert: (...args) => Alert.alert(...args) });
+    if (confirmed) await deleteProduct(id);
   };
 
   const openAddModal = () => {
@@ -102,6 +93,7 @@ export default function AdminProductsScreen() {
     setImageUrl('');
     setStock('');
     setCategoryId(categories[0]?._id || ''); setIsVeg(null); setAvailable(true); setAddons('');
+    setFormErrors({});
     setModalVisible(true);
   };
 
@@ -115,30 +107,39 @@ export default function AdminProductsScreen() {
     setCategoryId(typeof product.categoryId === 'object' ? product.categoryId?._id : product.categoryId || '');
     setIsVeg(typeof product.isVeg === 'boolean' ? product.isVeg : null); setAvailable(product.available !== false);
     setAddons((product.customizations || []).map(option => `${option.name}:${option.price}`).join('\n'));
+    setFormErrors({});
     setModalVisible(true);
   };
 
   const handleSaveProduct = async () => {
-    if (!name.trim() || price === '' || !Number.isFinite(Number(price)) || Number(price) < 0 || !categoryId || (stock.trim() !== '' && (!/^\d+$/.test(stock.trim()) || Number(stock) > Number.MAX_SAFE_INTEGER))) {
-      showMessage('Check product details', 'Name, non-negative price and a backend category are required.');
-      return;
-    }
+    const errors = {};
+    const parsedPrice = validateNumericText(price, { label: 'Price', min: 0, max: 90071992547409 });
+    if (parsedPrice.error) errors.price = parsedPrice.error;
+    const parsedStock = validateNumericText(stock, { label: 'Stock quantity', min: 0, max: Number.MAX_SAFE_INTEGER, integer: true, required: false });
+    if (parsedStock.error) errors.stock = parsedStock.error;
+    if (!name.trim()) errors.name = 'Product name is required.';
+    if (!categoryId) errors.categoryId = 'Choose a category.';
 
     let customizations;
     try {
       customizations = addons.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
-        const [optionName, optionPrice] = line.split(':');
-        if (!optionName?.trim() || optionPrice === undefined || !Number.isFinite(Number(optionPrice)) || Number(optionPrice) < 0) throw new Error('Enter each add-on as Name:price, one per line.');
-        return { name: optionName.trim(), price: Number(optionPrice) };
+        const separator = line.lastIndexOf(':');
+        const optionName = separator < 0 ? '' : line.slice(0, separator);
+        const optionPriceText = separator < 0 ? '' : line.slice(separator + 1);
+        const parsedOptionPrice = validateNumericText(optionPriceText, { label: `Add-on ${optionName.trim() || 'price'}`, min: 0, max: 90071992547409 });
+        if (!optionName.trim() || parsedOptionPrice.error) throw new Error(parsedOptionPrice.error || `Add-on ${optionName.trim() || 'name'} must use Name:price format.`);
+        return { name: optionName.trim(), price: parsedOptionPrice.value };
       });
-    } catch (e) { showMessage('Check add-ons', e.message); return; }
+    } catch (e) { errors.addons = e.message; }
+    setFormErrors(errors);
+    if (Object.keys(errors).length) return;
 
     const payload = {
       name: name.trim(),
-      price: Number(price),
+      price: parsedPrice.value,
       description: description.trim(),
       imageUrl: imageUrl.trim(),
-      categoryId, isVeg, available, customizations, stock: stock.trim() === '' ? null : Number(stock),
+      categoryId, isVeg, available, customizations, stock: stock.trim() === '' ? null : parsedStock.value,
     };
 
     try {
@@ -162,13 +163,17 @@ export default function AdminProductsScreen() {
         <Text style={styles.countText}>{products.length} menu items</Text>
         <Button title="+ Add Product" onPress={openAddModal} style={styles.addBtn} />
       </View>
+      <View style={styles.comboHint}>
+        <View style={{ flex: 1 }}><Text style={styles.comboTitle}>Admin-defined combos</Text><Text style={styles.comboCopy}>Add a “Combos” category, then manage each approved bundle as a normal menu product. Menu budget filters and server-side pricing continue to apply.</Text></View>
+        <TouchableOpacity onPress={() => router.push('/admin/categories')} style={styles.comboAction} accessibilityRole="button" accessibilityLabel="Manage categories for combo products"><Text style={styles.comboActionText}>Categories</Text></TouchableOpacity>
+      </View>
 
       <View style={styles.filters}><TextInput value={search} onChangeText={setSearch} placeholder="Search menu" style={styles.searchInput} /><ScrollView horizontal showsHorizontalScrollIndicator={false}>{[['ALL', 'All'], ...categories.map(c => [c._id, c.name])].map(([id, label]) => <TouchableOpacity key={id} onPress={() => setCategoryFilter(id)} style={[styles.chip, categoryFilter === id && styles.chipActive]}><Text style={[styles.chipText, categoryFilter === id && styles.chipTextActive]}>{label}</Text></TouchableOpacity>)}</ScrollView></View>
 
       {!!loadError && <TouchableOpacity style={styles.errorBanner} onPress={fetchProducts}><Text style={styles.errorText}>{loadError} · Tap to retry</Text></TouchableOpacity>}
 
       {loading ? (
-        <LoadingIndicator message="Loading menu inventory..." />
+        <AdminLoadingState message="Loading menu inventory…" />
       ) : (
         <FlatList
           keyboardShouldPersistTaps="handled"
@@ -177,14 +182,16 @@ export default function AdminProductsScreen() {
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => (
             <View style={styles.productCard}>
-              <ProductImage uri={item.imageUrl} style={styles.productImage} fallbackIconSize={20} accessibilityLabel={item.name} />
-              <View style={styles.cardInfo}>
-                <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.price}>₹{item.price} · {typeof item.categoryId === 'object' ? item.categoryId?.name : 'Menu item'} · {item.isVeg === true ? 'Veg' : item.isVeg === false ? 'Non-veg' : 'Unclassified'} · {item.stock == null ? 'Unlimited stock' : `${item.stock} left`}</Text>
-                {!!item.description?.trim() && <Text style={styles.desc} numberOfLines={1}>{item.description}</Text>}
+              <View style={styles.productMain}>
+                <ProductImage uri={item.imageUrl} style={styles.productImage} fallbackIconSize={20} accessibilityLabel={item.name} />
+                <View style={styles.cardInfo}>
+                  <Text style={styles.name} numberOfLines={2}>{item.name}</Text>
+                  <Text style={styles.price} numberOfLines={2}>₹{item.price} · {typeof item.categoryId === 'object' ? item.categoryId?.name : 'Menu item'} · {item.isVeg === true ? 'Veg' : item.isVeg === false ? 'Non-veg' : 'Unclassified'} · {item.stock == null ? 'Unlimited stock' : `${item.stock} left`}</Text>
+                  {!!item.description?.trim() && <Text style={styles.desc} numberOfLines={2}>{item.description}</Text>}
+                </View>
               </View>
 
-              <View style={styles.cardActions}>
+              <View style={styles.productControls}>
                 <View style={styles.switchRow}>
                   <Text style={[styles.switchLabel, item.available && styles.switchLabelActive]}>
                     {item.available ? 'AVAILABLE' : 'OFF'}
@@ -198,7 +205,7 @@ export default function AdminProductsScreen() {
                   />
                 </View>
 
-                <View style={{flexDirection: 'row', gap: 10, marginTop: 4}}>
+                <View style={styles.productActions}>
                   <TouchableOpacity
                     onPress={() => openEditModal(item)}
                     style={styles.deleteBtn}
@@ -219,35 +226,24 @@ export default function AdminProductsScreen() {
       )}
 
       {/* Add / Edit Product Modal */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{editingId ? 'Edit Product' : 'Add New Menu Item'}</Text>
-
-            <ScrollView style={styles.formScroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-              <Input label="Product Name" value={name} onChangeText={setName} placeholder="e.g. Paneer Wrap" />
-              <Input label="Price (₹)" value={price} onChangeText={setPrice} placeholder="e.g. 120" keyboardType="numeric" />
-              <Input label="Stock quantity (blank = unlimited)" value={stock} onChangeText={setStock} placeholder="e.g. 20" keyboardType="number-pad" />
-              <Input label="Description (optional)" value={description} onChangeText={setDescription} placeholder="Add verified ingredients when available" />
-              <Input label="Image URL (optional)" value={imageUrl} onChangeText={setImageUrl} placeholder="Add a product photo later" />
-              <Text style={styles.formLabel}>Category (required)</Text>
-              <View style={styles.categoryChoices}>{categories.map(category => <TouchableOpacity key={category._id} onPress={() => setCategoryId(category._id)} style={[styles.chip, categoryId === category._id && styles.chipActive]}><Text style={[styles.chipText, categoryId === category._id && styles.chipTextActive]}>{category.name}</Text></TouchableOpacity>)}</View>
-              <Text style={styles.formLabel}>Food type</Text>
-              <View style={styles.categoryChoices}>
-                {[[true, 'Veg'], [false, 'Non-veg'], [null, 'Unknown']].map(([value, label]) => <TouchableOpacity key={label} accessibilityRole="button" accessibilityState={{ selected: isVeg === value }} onPress={() => setIsVeg(value)} style={[styles.chip, isVeg === value && styles.chipActive]}><Text style={[styles.chipText, isVeg === value && styles.chipTextActive]}>{label}</Text></TouchableOpacity>)}
-              </View>
-              <View style={styles.formSwitch}><Text style={styles.formLabel}>Available to order</Text><Switch value={available} onValueChange={setAvailable} /></View>
-              <Text style={styles.formLabel}>Add-ons · one per line as Name:price</Text>
-              <TextInput value={addons} onChangeText={setAddons} multiline placeholder={'Extra cheese:20\nJalapeños:15'} style={styles.addonsInput} />
-            </ScrollView>
-
-            <View style={styles.modalActions}>
-              <Button title="Cancel" variant="outline" onPress={() => setModalVisible(false)} style={styles.modalBtn} />
-              <Button title={saving ? 'Saving…' : editingId ? "Save Changes" : "Save Product"} onPress={handleSaveProduct} disabled={saving} style={styles.modalBtn} />
-            </View>
-          </View>
+      <AdminFormModal visible={modalVisible} onClose={() => setModalVisible(false)} onSave={handleSaveProduct} saving={saving} title={editingId ? 'Edit product' : 'Add new menu item'} saveTitle={editingId ? 'Save changes' : 'Save product'}>
+        <Input label="Product Name" value={name} onChangeText={value => { setName(value); setFormErrors(previous => ({ ...previous, name: undefined })); }} placeholder="e.g. Paneer Wrap" error={formErrors.name} />
+        <Input label="Price (₹)" value={price} onChangeText={value => { setPrice(value); setFormErrors(previous => ({ ...previous, price: undefined })); }} placeholder="e.g. 120" keyboardType="decimal-pad" error={formErrors.price} />
+        <Input label="Stock quantity (blank = unlimited)" value={stock} onChangeText={value => { setStock(value); setFormErrors(previous => ({ ...previous, stock: undefined })); }} placeholder="e.g. 20" keyboardType="number-pad" error={formErrors.stock} />
+        <Input label="Description (optional)" value={description} onChangeText={setDescription} placeholder="Add verified ingredients when available" />
+        <Input label="Image URL (optional)" value={imageUrl} onChangeText={setImageUrl} placeholder="Add a product photo later" />
+        <Text style={styles.formLabel}>Category (required)</Text>
+        <View style={styles.categoryChoices}>{categories.map(category => <TouchableOpacity key={category._id} onPress={() => { setCategoryId(category._id); setFormErrors(previous => ({ ...previous, categoryId: undefined })); }} style={[styles.chip, categoryId === category._id && styles.chipActive]}><Text style={[styles.chipText, categoryId === category._id && styles.chipTextActive]}>{category.name}</Text></TouchableOpacity>)}</View>
+        {formErrors.categoryId ? <Text accessibilityRole="alert" style={styles.formError}>{formErrors.categoryId}</Text> : null}
+        <Text style={styles.formLabel}>Food type</Text>
+        <View style={styles.categoryChoices}>
+          {[[true, 'Veg'], [false, 'Non-veg'], [null, 'Unknown']].map(([value, label]) => <TouchableOpacity key={label} accessibilityRole="button" accessibilityState={{ selected: isVeg === value }} onPress={() => setIsVeg(value)} style={[styles.chip, isVeg === value && styles.chipActive]}><Text style={[styles.chipText, isVeg === value && styles.chipTextActive]}>{label}</Text></TouchableOpacity>)}
         </View>
-      </Modal>
+        <View style={styles.formSwitch}><Text style={styles.formLabel}>Available to order</Text><Switch value={available} onValueChange={setAvailable} /></View>
+        <Text style={styles.formLabel}>Add-ons · one per line as Name:price</Text>
+        <TextInput value={addons} onChangeText={value => { setAddons(value); setFormErrors(previous => ({ ...previous, addons: undefined })); }} multiline placeholder={'Extra cheese:20\nJalapeños:15'} style={[styles.addonsInput, formErrors.addons && styles.formInputInvalid]} />
+        {formErrors.addons ? <Text accessibilityRole="alert" style={styles.formError}>{formErrors.addons}</Text> : null}
+      </AdminFormModal>
     </View>
   );
 }
@@ -268,12 +264,17 @@ const styles = StyleSheet.create({
   searchInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.textPrimary },
   chip: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', marginRight: 6 },
   chipActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primary }, chipText: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '700' }, chipTextActive: { color: '#fff' },
-  errorBanner: { marginHorizontal: 16, marginBottom: 10, backgroundColor: '#FCEBE8', borderRadius: 8, padding: 11 }, errorText: { color: '#9B3328', fontSize: 12 },
+  errorBanner: { marginHorizontal: 16, marginBottom: 10, backgroundColor: '#FCEBE8', borderRadius: 8, padding: 11 }, errorText: { color: '#9B3328', fontSize: 12 }, formError: { color: COLORS.danger, fontSize: 12, lineHeight: 16, marginTop: -6, marginBottom: 10, fontWeight: '700' }, formInputInvalid: { borderColor: COLORS.danger },
   countText: {
     fontSize: 14,
     fontWeight: '700',
     color: COLORS.textPrimary,
   },
+  comboHint: { marginHorizontal: 16, marginBottom: 10, padding: 12, gap: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF5EF', borderWidth: 1, borderColor: '#F3D9CB', borderRadius: 11 },
+  comboTitle: { color: '#302F2D', fontSize: 14, fontWeight: '900' },
+  comboCopy: { color: '#6F6A65', fontSize: 12, lineHeight: 17, marginTop: 3 },
+  comboAction: { minHeight: 48, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', borderRadius: 9, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E9D4C8' },
+  comboActionText: { color: COLORS.primary, fontSize: 12, fontWeight: '900' },
   addBtn: {
     minHeight: 48,
     paddingHorizontal: 14,
@@ -283,9 +284,8 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   productCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: 'column',
+    alignItems: 'stretch',
     backgroundColor: '#FFFFFF',
     padding: 14,
     borderRadius: 14,
@@ -293,10 +293,11 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     marginBottom: 10,
   },
+  productMain: { flexDirection: 'row', alignItems: 'center', minWidth: 0 },
   productImage: { width: 56, height: 56, borderRadius: 8, marginRight: 11, backgroundColor: '#EEE' },
   cardInfo: {
     flex: 1,
-    marginRight: 10,
+    minWidth: 0,
   },
   name: {
     fontSize: 15,
@@ -304,7 +305,8 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
   },
   price: {
-    fontSize: 14,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '900',
     color: COLORS.primary,
     marginTop: 2,
@@ -314,10 +316,8 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 2,
   },
-  cardActions: {
-    alignItems: 'flex-end',
-    gap: 8,
-  },
+  productControls: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 10, paddingTop: 8 },
+  productActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   deleteBtn: {
-    padding: 4,
+    width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: '#FFF8F4',
   },
   modalOverlay: {
     flex: 1,

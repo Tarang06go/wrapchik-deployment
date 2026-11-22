@@ -12,16 +12,18 @@ const collect = (dir, filter, out) => {
 };
 
 const toPosix = (value) => value.split(path.sep).join('/');
+const routeFile = (name) => /\.jsx?$/.test(name) && !name.startsWith('+') && !name.startsWith('_');
+const sourceFile = (name) => /\.jsx?$/.test(name) && name !== '+html.jsx';
 
 const routes = new Set();
-for (const file of collect('app', (name) => /\.jsx?$/.test(name), [])) {
+for (const file of collect('app', routeFile, [])) {
   let route = toPosix(file).replace(/^app/, '').replace(/\.jsx?$/, '');
   if (route.endsWith('/index')) route = route.slice(0, -'/index'.length);
   routes.add(route || '/');
 }
 
 const targets = new Map();
-for (const file of [...collect('app', (name) => /\.jsx?$/.test(name), []), ...collect('components', (name) => /\.jsx?$/.test(name), []), ...collect('context', (name) => /\.jsx?$/.test(name), []), ...collect('services', (name) => /\.jsx?$/.test(name), [])]) {
+for (const file of [...collect('app', sourceFile, []), ...collect('components', sourceFile, []), ...collect('context', sourceFile, []), ...collect('services', sourceFile, [])]) {
   const source = fs.readFileSync(file, 'utf8');
   const patterns = [
     /(?:router\.(?:push|replace|navigate)|href=)\s*\(?\{?\s*(?:pathname\s*:\s*)?['"`]([^'"`]+)['"`]/g,

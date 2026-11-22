@@ -178,7 +178,7 @@ const createOrder = async (req, res, next) => {
       loyaltyEarnEveryRupeesSnapshot: loyaltyPolicyReady(settings.loyalty) ? settings.loyalty.earnEveryRupees : 0,
       loyaltyPointsPerStepSnapshot: loyaltyPolicyReady(settings.loyalty) ? settings.loyalty.pointsPerStep : 0,
       paymentMethod,
-      pickupLocation: orderType === 'TAKEAWAY' ? (pickupLocation || 'Wrapchik Counter, SAC Ground Floor') : undefined,
+      pickupLocation: orderType === 'TAKEAWAY' ? require('../utils/pickupLocation').resolvePickupLocation(settings.pickupLocation) : undefined,
       pickupTimeSlot: orderType === 'TAKEAWAY' ? (pickupSlotReservation ? `Scheduled · ${new Date(scheduledPickupAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}` : (pickupTimeSlot || '15-20 Mins')) : undefined,
       scheduledPickupAt: pickupSlotReservation ? new Date(scheduledPickupAt) : null,
       pickupSlotId: pickupSlotReservation?._id,
@@ -275,20 +275,79 @@ const createOrder = async (req, res, next) => {
 // @access  Private
 const getMyOrders = async (req, res, next) => {
   try {
+    const query = req.query || {};
     const GroupOrder = require('../models/GroupOrder');
     const memberGroups = await GroupOrder.find({
       orderId: { $ne: null },
       members: { $elemMatch: { userId: req.user._id, status: 'JOINED' } },
     }).select('_id').lean();
     const groupOrderIds = memberGroups.map((group) => group._id);
-    const orders = await Order.find({ $or: [{ userId: req.user._id }, ...(groupOrderIds.length ? [{ groupOrderId: { $in: groupOrderIds } }] : [])] })
+    const ownershipFilter = { $or: [{ userId: req.user._id }, ...(groupOrderIds.length ? [{ groupOrderId: { $in: groupOrderIds } }] : [])] };
+
+    // Home only needs a single ready pickup and a small recovery window. Avoid
+    // serializing every historical order on each Home focus/socket refresh.
+    if (query.homeSummary === 'true') {
+      const [readyOrders, pendingPaymentOrders] = await Promise.all([
+        Order.find({ $and: [ownershipFilter, { orderType: 'TAKEAWAY', orderStatus: 'READY', paymentStatus: 'SUCCESS' }] })
+          .select('_id orderNumber orderType orderStatus paymentStatus createdAt groupOrderId')
+          .sort({ createdAt: -1 }).limit(1).lean(),
+        Order.find({
+          userId: req.user._id,
+          groupOrderId: null,
+          orderStatus: 'PLACED',
+          paymentMethod: { $in: ['RAZORPAY', 'CASHFREE', 'UPI_QR'] },
+          paymentStatus: { $nin: ['SUCCESS', 'CANCELLED'] },
+        })
+          .select('_id orderNumber orderType orderStatus paymentStatus paymentMethod paymentId groupOrderId createdAt')
+          .populate('paymentId', 'status upiTransactionReference')
+          .sort({ createdAt: -1 }).limit(20).lean(),
+      ]);
+      return res.json({
+        success: true,
+        readyPickupOrder: readyOrders[0] || null,
+        pendingPaymentOrders,
+      });
+    }
+
+    const readyPickupFilter = req.query?.readyPickup === 'true'
+      ? [{ orderType: 'TAKEAWAY', orderStatus: 'READY', paymentStatus: 'SUCCESS' }]
+      : [];
+    const statusGroups = {
+      ACTIVE: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'PICKED_UP'],
+      COMPLETED: ['COMPLETED', 'DELIVERED', 'SERVED', 'REJECTED', 'CANCELLED'],
+    };
+    if (query.statusGroup != null && !Object.prototype.hasOwnProperty.call(statusGroups, query.statusGroup)) {
+      return res.status(400).json({ success: false, message: 'Invalid order status filter.' });
+    }
+    const filters = [...readyPickupFilter];
+    if (query.statusGroup) filters.push({ orderStatus: { $in: statusGroups[query.statusGroup] } });
+    const orderFilter = filters.length ? { $and: [ownershipFilter, ...filters] } : ownershipFilter;
+
+    const hasPageParams = query.limit != null || query.skip != null;
+    let pageLimit = null;
+    let skip = 0;
+    if (hasPageParams) {
+      pageLimit = query.limit == null ? 20 : Number(query.limit);
+      skip = query.skip == null ? 0 : Number(query.skip);
+      if (!Number.isSafeInteger(pageLimit) || pageLimit < 1 || pageLimit > 100
+        || !Number.isSafeInteger(skip) || skip < 0 || skip > 1_000_000) {
+        return res.status(400).json({ success: false, message: 'Invalid order page request.' });
+      }
+    }
+
+    let orderQuery = Order.find(orderFilter)
       .populate('paymentId', 'method status upiTransactionReference verificationReason verifiedBy verifiedAt')
       .sort({ createdAt: -1 });
+    if (hasPageParams) orderQuery = orderQuery.skip(skip).limit(pageLimit + 1);
+    let orders = await orderQuery;
+    const hasMore = hasPageParams && orders.length > pageLimit;
+    if (hasMore) orders = orders.slice(0, pageLimit);
 
-    res.json({
+    return res.json({
       success: true,
       count: orders.length,
       orders,
+      ...(hasPageParams ? { hasMore } : {}),
     });
   } catch (error) {
     next(error);
@@ -422,6 +481,7 @@ const cancelOrder = async (req, res, next) => {
       linkedGroup.status = 'CANCELLED';
       linkedGroup.cancelledAt = new Date();
       await linkedGroup.save();
+      await require('../utils/groupActivity').recordGroupActivity({ groupId: linkedGroup._id, actorId: req.user._id, actorName: req.user.name, type: 'GROUP_CANCELLED', message: 'The group order was cancelled before payment verification.' });
       socketManager.emitGroupUpdate(linkedGroup);
     }
 

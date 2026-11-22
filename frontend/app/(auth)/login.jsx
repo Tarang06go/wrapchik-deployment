@@ -155,7 +155,7 @@ export default function LoginScreen() {
             <>
               <Input label="Thapar student email" value={email} onChangeText={setEmail} placeholder="you@thapar.edu" keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" returnKeyType="next" blurOnSubmit={false} onSubmitEditing={() => passwordInputRef.current?.focus()} testID="student-email-input" />
               <Input ref={passwordInputRef} label="Password" value={password} onChangeText={setPassword} placeholder="Your password" secureTextEntry showPasswordToggle autoComplete="current-password" textContentType="password" returnKeyType="go" onSubmitEditing={() => { Keyboard.dismiss(); void handlePasswordLogin(); }} testID="student-password-input" />
-              <TouchableOpacity accessibilityRole="button" onPress={() => router.push('/(auth)/forgot-password')} style={styles.forgotLink}>
+              <TouchableOpacity accessibilityRole="button" onPress={() => router.push({ pathname: '/(auth)/forgot-password', params: { email: email.trim().toLowerCase() } })} style={styles.forgotLink}>
                 <Text style={styles.changeLink}>Forgot password?</Text>
               </TouchableOpacity>
               <Button title="Sign In" onPress={() => { Keyboard.dismiss(); void handlePasswordLogin(); }} loading={isLoading} style={styles.mainButton} testID="student-sign-in-button" />
@@ -208,7 +208,7 @@ export default function LoginScreen() {
             <>
               <Input label="Email" value={email} onChangeText={setEmail} placeholder="you@example.com" keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" returnKeyType="next" blurOnSubmit={false} onSubmitEditing={() => passwordInputRef.current?.focus()} testID="admin-email-input" />
               <Input ref={passwordInputRef} label="Password" value={password} onChangeText={setPassword} placeholder="Your password" secureTextEntry showPasswordToggle autoComplete="current-password" textContentType="password" returnKeyType="go" onSubmitEditing={() => { Keyboard.dismiss(); void handlePasswordLogin(); }} testID="admin-password-input" />
-              <TouchableOpacity accessibilityRole="button" onPress={() => router.push('/(auth)/forgot-password')} style={styles.forgotLink}>
+              <TouchableOpacity accessibilityRole="button" onPress={() => router.push({ pathname: '/(auth)/forgot-password', params: { email: email.trim().toLowerCase() } })} style={styles.forgotLink}>
                 <Text style={styles.changeLink}>Forgot password?</Text>
               </TouchableOpacity>
               <Button title="Sign In" onPress={() => { Keyboard.dismiss(); void handlePasswordLogin(); }} loading={isLoading} style={styles.mainButton} testID="admin-sign-in-button" />

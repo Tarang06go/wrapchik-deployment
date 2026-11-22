@@ -11,18 +11,16 @@ const normalizeApiBaseUrl = (value) => {
 
 const isLoopbackHost = (hostname) => {
   const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
-  return host === 'localhost' || host === '::1' || host === '10.0.2.2' || /^127\./.test(host);
+  return host === 'localhost' || host === 'localhost.localdomain' || host === '::1' || host === '10.0.2.2' || host === '0.0.0.0' || /^127\./.test(host);
 };
 
-// An outlet backend on the campus/laptop LAN is plain HTTP. That is a private address the
-// phone can only reach on the local network, so it is allowed in release builds too. Public
-// hostnames still require HTTPS.
 const isPrivateNetworkHost = (hostname) => {
   const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
-  if (/^10\./.test(host)) return true;
-  if (/^192\.168\./.test(host)) return true;
+  if (isLoopbackHost(host) || /^(10\.|169\.254\.|192\.168\.)/.test(host) || /\.(?:local|localhost)$/.test(host)) return true;
+  if (host.startsWith('::ffff:')) return isPrivateNetworkHost(host.slice('::ffff:'.length));
   const match = host.match(/^172\.(\d{1,3})\./);
-  return Boolean(match && Number(match[1]) >= 16 && Number(match[1]) <= 31);
+  if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return true;
+  return /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host);
 };
 
 export const resolveApiBaseUrl = ({
@@ -34,12 +32,15 @@ export const resolveApiBaseUrl = ({
 }) => {
   const configured = normalizeApiBaseUrl(configuredUrl);
   if (configured) {
+    const configuredHost = new URL(configured).hostname;
+    if (!development && isPrivateNetworkHost(configuredHost)) {
+      return { baseUrl: null, error: 'Preview and production builds cannot use a private LAN backend. Set EXPO_PUBLIC_API_URL to the public HTTPS backend URL.' };
+    }
     if (platform === 'android' && isLoopbackHost(new URL(configured).hostname)) {
       return { baseUrl: null, error: 'Android phone testing cannot use localhost or 10.0.2.2. Set EXPO_PUBLIC_API_URL to http://<laptop-LAN-IPv4>:5000.' };
     }
-    const configuredHost = new URL(configured).hostname;
-    if (!development && !/^https:\/\//i.test(configured) && !isPrivateNetworkHost(configuredHost)) {
-      return { baseUrl: null, error: 'Production builds require EXPO_PUBLIC_API_URL to use HTTPS (plain HTTP is only allowed for a private LAN address).' };
+    if (!development && !/^https:\/\//i.test(configured)) {
+      return { baseUrl: null, error: 'Preview and production builds require a public HTTPS EXPO_PUBLIC_API_URL.' };
     }
     return { baseUrl: configured, error: null };
   }

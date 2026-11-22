@@ -5,7 +5,7 @@ Configure local development without changing current database records. Never pas
 ## Accounts and values
 
 1. **Outlet UPI details** — optional; only needed if the outlet enables UPI. Obtain the outlet-approved UPI ID and payee label, then enter them in Admin → Settings → Customer Payments and enable UPI. The app generates an order-specific amount/reference QR, so no static QR image is needed. Do not use a personal UPI account without outlet authorization.
-2. **Email delivery** — real OTP delivery requires backend Gmail SMTP settings (`SMTP_USER`, `SMTP_APP_PASSWORD`); Gmail App Passwords require Google 2-Step Verification. Resend (`RESEND_API_KEY`, `EMAIL_FROM`) is an optional fallback. Do not copy credentials into frontend files.
+2. **Email delivery** — local Gmail SMTP (`SMTP_USER`, `SMTP_APP_PASSWORD`) and Resend (`RESEND_API_KEY`, `EMAIL_FROM`) are supported. On Render Free, use Resend over HTTPS and leave SMTP variables unset because outbound SMTP ports are blocked. Resend requires a verified sender domain. Do not copy credentials into frontend files.
 3. **Expo/EAS account** — required for cloud EAS builds. Keep the existing app identifiers and EAS project ID.
 4. **Firebase project** — needed for Android push credentials if using push notifications in a production Android build.
 5. **MongoDB Atlas or managed MongoDB** — only for hosted staging/production; local development can continue using local MongoDB.
@@ -64,6 +64,18 @@ npm start -- --web --port 8081
 
 Open `http://localhost:8081`. If port 5000 already belongs to the active Wrapchik backend, keep using it; do not start a duplicate.
 
+## Isolated demo catalogue
+
+The screenshot menu can be seeded into a separate local database only. This path accepts `MONGO_DEMO_URI=mongodb://127.0.0.1:27017/wrapchik_demo`; it refuses Atlas/remote hosts, any other database name, and production mode. It only touches categories/products and never creates demo orders, payments, or user accounts. Five truncated screenshot names and rows without verified photos remain flagged for review.
+
+```powershell
+Set-Location 'C:\Users\Tarang\Desktop\wrapchik\wrapchik_upgraded_16\wrapchik\backend'
+npm run db:seed-demo
+npm run db:seed-demo -- --apply --confirm-demo-db
+```
+
+The first command is read-only. The second is explicit and idempotent; do not point `MONGO_DEMO_URI` at the operating database. Server startup sample/demo-account flags are also restricted to the local `wrapchik_demo` database.
+
 ## New checkout payments
 
 - In Admin → Settings → Customer Payments, enable Cash and/or UPI. Cash is enabled by default. UPI stays disabled until the administrator enters a valid outlet UPI ID and payee name and enables it.
@@ -94,7 +106,7 @@ The report flags duplicate names, missing images/categories, categories outside 
 - The home screen's **Previously ordered** rail and personalized recommendations appear only when verified completed-order history exists; previously ordered cards use current catalogue prices and availability. No artificial catalogue items or orders are inserted.
 - Student-only coupons require an active student account with a verified `@thapar.edu` email. Optional weekday/time windows are enforced by the server in `Asia/Kolkata`, including overnight windows; coupons without these settings retain their prior unrestricted behavior.
 - **Meal plans** save current cart product IDs, quantities and customization names locally under the signed-in account. They store no price and re-fetch each menu item before adding a plan to cart. Tomorrow/next-week reminders are local OS notifications (not push delivery); checkout revalidates today's prices and optional pickup slots.
-- Cart and checkout directions use a free Google Maps URL on Android, iOS, and web, with the pickup location loaded from public outlet settings and a TIET SAC fallback. No embedded map SDK, API key, GPS permission, or paid Maps service is used.
+- Cart, checkout, and Share a Meal show Google Maps directions only after an administrator configures the optional campus pickup point in Admin → Store settings. The backend snapshots that configured value on new takeaway orders; when blank, it preserves the existing SAC Ground Floor address for compatibility. No embedded map SDK, API key, GPS permission, or paid Maps service is used.
 - Loyalty earning is off by default. An administrator can configure the approved spend block, points per block, paise per point, minimum redemption, maximum redemption percentage (up to 50%), and lifetime tiers under Admin → Store Settings. Enabling requires complete values and a first tier starting at zero. Existing balances are append-only; the app does not apply an expiry policy. Individual-order redemptions are recalculated by the backend and returned if an unpaid order is cancelled or rejected. Group orders do not earn or redeem points.
 - Before enabling the loyalty ledger on a separate database, check its additive index migration with `cd backend; npm run db:loyalty-indexes`; use `npm run db:loyalty-indexes -- --apply` only after reviewing the duplicate check. `npm run db:check` reports expected ledger indexes.
 - The additive query indexes for order history, kitchen queue, category/availability, product-name search, payment references and group status can be reviewed with `cd backend; npm run db:query-indexes` and created with `npm run db:query-indexes -- --apply`. The preview does not create indexes; neither migration changes order, payment, user or catalogue documents. Production Mongoose auto-indexing is disabled, so review/apply release index migrations explicitly.
@@ -115,7 +127,7 @@ These commands generate native project files and build/install a development app
 ## Configuration still required
 
 - No payment-provider account, key or webhook is required for current checkout.
-- Real email delivery: configure Gmail SMTP credentials, or the optional Resend fallback, in `backend/.env`.
+- Real email delivery: configure Gmail SMTP credentials locally or a verified Resend sender. For Render Free, use `RESEND_API_KEY` and `EMAIL_FROM`; SMTP is blocked by the host.
 - Outlet UPI ID and payee name: **must be supplied and saved by outlet admin before enabling UPI**.
 - Firebase push credentials: **not verified/configured**.
 

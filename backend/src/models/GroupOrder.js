@@ -50,6 +50,7 @@ const groupMemberShareSchema = new mongoose.Schema({
 const groupOrderSchema = new mongoose.Schema(
   {
     groupCode: { type: String, required: true, unique: true, uppercase: true },
+    name: { type: String, trim: true, maxlength: 48, default: 'Share a Meal' },
     leaderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     members: [groupMemberSchema],
     items: { type: [groupItemSchema], default: [] },
@@ -68,10 +69,13 @@ const groupOrderSchema = new mongoose.Schema(
     expiresAt: { type: Date, default: null },
     lockedAt: { type: Date, default: null },
     cancelledAt: { type: Date, default: null },
+    paymentReminderLastSentAt: { type: Date, default: null },
+    paymentReminderCount: { type: Number, default: 0, min: 0, max: 6 },
   },
   { timestamps: true, optimisticConcurrency: true }
 );
 
 groupOrderSchema.index({ status: 1, createdAt: -1 }, { name: 'group_status_created' });
+groupOrderSchema.index({ 'members.userId': 1, updatedAt: -1 }, { name: 'group_member_updated' });
 
 module.exports = mongoose.model('GroupOrder', groupOrderSchema);

@@ -2,14 +2,32 @@
 
 Nothing was deployed or published. Keep development, staging and production databases and credentials separate.
 
+## Current deployment status — 2026-11-22
+
+| Work item | Status | Evidence |
+| --- | --- | --- |
+| Render/Expo/PWA deployment configuration and safety checks | DONE | Blueprint, release URL validation, PWA export and manual EAS Update workflow are in source. |
+| Automated local tests and Android/iOS/web JS exports | DONE | Latest full results are recorded in PROGRESS.md (2026-11-21); not rerun during this access-only recheck. |
+| GitHub repository and automatic deployment | BLOCKED | The connected account has no suitable private repository; the existing Wrapchik repository is public. GitHub CLI 2.105.0 is installed but not authenticated; no remote is configured and 171 worktree entries remain pending. |
+| Atlas demo project/cluster/app user | DONE | Created a separate Wrapchik Demo project, AWS Singapore Free cluster (Atlas state IDLE), and cluster-scoped app user with readWrite limited to wrapchik_demo. Credentials are kept out of source/docs. |
+| Atlas app access and catalogue inventory/import | BLOCKED | Render service egress ranges and read-only source-database access are not available. Import still requires the source/destination inventory and explicit approval. |
+| Public Render API and database readiness | BLOCKED | No Wrapchik service exists in Render; /ready has not been checked against hosted MongoDB. |
+| Public website and iPhone Home Screen PWA | BLOCKED | Export configuration exists, but there is no hosted HTTPS origin or deployed API. |
+| Standalone Android preview APK | BLOCKED | No public HTTPS API value or Expo token/session; no EAS build was started. |
+| Google OAuth, email delivery, browser/device flows | UNVERIFIED | Client/server configuration paths exist, but hosted credentials and real provider/device verification are absent. |
+| Physical Android/iPhone acceptance | UNVERIFIED | No connected handset test was performed. |
+
 ## Suggested hosting shape
 
 - **Client:** Expo EAS builds. The app identifier and EAS project ID are already configured in the frontend.
+- **iPhone/web:** `npm run export:web` emits the static web shell plus standalone PWA manifest, Apple home-screen metadata, and a 1024px Wrapchik icon. Host the exported `dist/` directory over HTTPS and configure SPA route rewrites; on iPhone, open the HTTPS site in Safari and choose **Share → Add to Home Screen**. This is an online client; it does not cache authenticated account, cart, or payment data for offline use.
 - **API:** a managed Node host with persistent Express + Socket.IO support, TLS, health checks, environment secrets, logs and reliable uptime. Render is one prototype option, but its free services can suspend and its documentation says free instances are not for production. Use paid always-on compute for outlet operations.
 - **Database:** MongoDB Atlas. M0 is a small development/proof-of-concept tier (512 MB shared cluster); choose a paid tier and backups suitable for the outlet before launch.
 - **Images:** existing catalogue URLs remain. Campaign banners accept already-hosted HTTPS Cloudinary URLs; upload is performed through Cloudinary's own console. No Cloudinary API credential or direct upload endpoint is present in this codebase, and customer functionality does not require Cloudinary for ordinary ordering.
 - **Payments:** New orders use cash at counter or outlet-configured UPI with manual administrator verification. Legacy gateway records remain supported for historical orders.
 - **Push:** configure Expo project and Android Firebase credentials for EAS builds, then verify delivery on a real test device.
+
+The repository [`render.yaml`](render.yaml) now defines a one-instance Render Free API and a separate static web/PWA site. The API uses Render-managed HTTPS, `/health`, a generated `JWT_SECRET`, and prompts for `MONGO_URI`, exact `CORS_ORIGIN`, Resend, and Google credentials instead of storing them in source. The static build validates `EXPO_PUBLIC_API_URL`, exports the PWA, and rewrites app routes to `index.html`. Keep `numInstances: 1` while rate limits and group-expiry scheduling use process memory. The Blueprint does not deploy until this repository is connected to Render and external values are entered.
 
 For a zero-cost classroom/demo deployment, a suspended free web service and Atlas M0 can be evaluated if current provider terms allow it. Expect cold starts and finite shared storage; Atlas M0 has a 512 MB storage limit and does not provide automated backups. It is not a suitable reliability commitment for live outlet service. Recheck current plan limits and terms before choosing providers; a free health pinger cannot make a suspended service production-reliable.
 
@@ -34,7 +52,9 @@ Keep all three `EXPO_PUBLIC_*` values in the EAS environment or local frontend `
 
 ### Health and CORS
 
-`GET /health` returns HTTP 200 only while MongoDB is connected and HTTP 503 otherwise. Set production `CORS_ORIGIN` to comma-separated, exact browser origins (for example `https://wrapchik.example,https://admin.wrapchik.example`); production refuses an empty value or `*`. Native Android/iOS requests do not use browser CORS, but web origins must be listed.
+`GET /health` is lightweight process liveness and returns HTTP 200 while Express is running. `GET /ready` is database-aware and returns HTTP 503 while MongoDB is disconnected; `/api/health` remains a readiness-compatible alias. The server binds first and retries MongoDB with capped backoff, so an Atlas outage/cold start does not block liveness. Group expiry is rechecked after startup connection and on its existing interval. Set production `CORS_ORIGIN` to the exact deployed HTTPS web origin. HTTP and Socket.IO share the same origin list; native Android/iOS requests do not use browser CORS.
+
+The frontend checks `/ready` on retry. It retains catalogue caching and the API client retries only safe GET requests; order/payment mutations are not automatically retried. Do not add traffic pingers. Render Free services suspend after 15 minutes without traffic and can take about a minute to resume; outbound SMTP ports are blocked. Use the HTTPS Resend provider on Render Free and leave Gmail SMTP variables unset there. See [Render Free limits](https://render.com/docs/free) and [Render WebSocket support](https://render.com/docs/websocket).
 
 ### Campus directions
 
@@ -42,10 +62,12 @@ The outlet directions control opens a free Google Maps URL on Android, iOS, and 
 
 ## Staging
 
-- Create a separate Atlas database and service credentials.
-- Deploy the API behind HTTPS. Set exact `CORS_ORIGIN`, `TRUST_PROXY_HOPS` to the reverse-proxy hop count, a random `JWT_SECRET`, and backend email SMTP settings. Keep all private credentials in the backend host’s secret manager.
+- Create a separate Atlas free demonstration cluster/database (suggested database name `wrapchik_demo`) and a least-privilege database user with access only to that database. In Atlas, allowlist the outbound CIDR ranges shown for the Render API service/region; do not use `0.0.0.0/0` unless the hosting provider leaves no narrower option. Atlas explicitly warns that `/0` allows connections from anywhere. See [Render outbound IP ranges](https://render.com/docs/outbound-ip-addresses) and [Atlas IP access lists](https://www.mongodb.com/docs/atlas/security/ip-access-list/).
+- Deploy the API behind HTTPS. Set exact `CORS_ORIGIN`, `TRUST_PROXY_HOPS` to the reverse-proxy hop count, a random `JWT_SECRET`, a dedicated Atlas `MONGO_URI`, and a verified HTTPS email sender (`RESEND_API_KEY` + `EMAIL_FROM`). Render Free blocks outbound SMTP ports, so do not set `SMTP_USER`/`SMTP_APP_PASSWORD` there. Keep private credentials in the backend host’s secret manager.
 - Set the Expo staging environment’s `EXPO_PUBLIC_API_URL` to the HTTPS API URL. Never put private keys in Expo public variables.
 - Verify cash and UPI workflows using clearly identified staging data; keep UPI payment pending until an administrator verifies actual receipt.
+
+Before any catalogue import, inventory the read-only local source and empty demo destination identities/counts, then request explicit approval. Copy only products, categories, and non-sensitive catalogue settings. Never copy users, orders, OTPs, payments, or sessions. This repository session did not have a running MongoDB source or Atlas account, so no inventory/import was performed.
 
 ## Production preparation (not completed or authorized)
 
@@ -69,16 +91,27 @@ The outlet directions control opens a free Google Maps URL on Android, iOS, and 
 From PowerShell, after the matching EAS environment has an HTTPS `EXPO_PUBLIC_API_URL` and required OAuth client IDs:
 
 ```powershell
-Set-Location 'C:\path\to\wrapchik\frontend'
+Set-Location 'C:\Users\Tarang\Desktop\wrapchik\wrapchik_upgraded_16\wrapchik\frontend'
+eas build --platform android --profile development
 eas build --platform android --profile preview
 eas build --platform android --profile production
 ```
 
-`preview` creates an internally distributed Android APK; `production` creates the Android release bundle. The current app validates missing, placeholder, loopback and non-HTTPS API URLs before preview/production builds. Build credentials, Google OAuth clients and the actual deployed API are external setup and are not verified by a JavaScript export. The development APK command is `eas build --platform android --profile development`.
+`development` creates an internal development-client APK; after installing it, start its Metro server with `npx expo start --dev-client --lan`. Configure that EAS environment with a reachable development `EXPO_PUBLIC_API_URL` (for phone testing, use the laptop's LAN URL). `preview` creates an internally distributed standalone Android APK; configure its EAS `preview` environment with the public HTTPS API URL and required public OAuth client IDs. `production` creates the Android release bundle. Preview/production checks reject missing, placeholder, loopback, emulator, private LAN, and non-HTTPS API URLs. App version is now **1.0.1** with Android `versionCode 2`; the `appVersion` runtime advances with it for native compatibility. EAS authentication/signing credentials, Google OAuth clients, Atlas, and deployed URLs remain external; JavaScript exports do not verify them.
+
+### EAS Update channels
+
+The existing Expo project ID, update URL, SDK-matched `expo-updates`, `appVersion` runtime policy, and development/preview/production channels are preserved. CI compares Expo/native dependencies, plugins, Android/iOS files, and native config against the installed build baseline, and requires a higher app version for native changes. The manually triggered [EAS Update workflow](.github/workflows/eas-update.yml) requires an explicit channel, native baseline commit, message, `EXPO_TOKEN` secret, matching public HTTPS EAS API variable, all tests, and an affirmative publish confirmation. SDK 57 updates use the selected Expo environment, not local `.env`; see [Expo environment variables](https://docs.expo.dev/eas/environment-variables/usage/). Roll back a published update with `eas update:rollback`; the CLI guides the rollback to an earlier update or embedded build. See [Expo rollback guidance](https://docs.expo.dev/eas-update/rollbacks/). No update was published here.
+
+Render deploys from its connected Git branch by default. This repository has no Git remote configured, so automatic GitHub-to-Render deployment is prepared in the Blueprint but not connected or exercised. Connect the repository and enable the Blueprint services after the demo database and public URLs are ready.
+
+**Access re-check (2026-11-22):** GitHub, Render, and Atlas connectors are authenticated. The GitHub account has no suitable private Wrapchik repository (its existing Wrapchik repository is public), and the connector cannot create a repository. GitHub CLI 2.105.0 is installed but `gh auth status` reports no login; run `gh auth login` in a user terminal to enable creation of a new private repository and reviewed push. No remote was configured or pushed. Render has one workspace but only unrelated services. Atlas has a new Wrapchik Demo project, a free AWS Singapore cluster in IDLE state, and an app user scoped to readWrite on `wrapchik_demo` only. No network allowlist, source inventory, or catalogue import is configured. The EAS CLI is present, but its account check could not reach `api.expo.dev` because DNS/network access failed, and no `EXPO_TOKEN` is configured. The desktop browser integration reported local browser access unavailable. No app source, existing database, orders, payments, or catalogue records were changed.
+
+Render Free web services can suspend after 15 minutes idle and may take about a minute to resume; Render also documents usage overages and warns that Free services are not intended for production. Treat the current free configuration as a demo deployment only. Before adding services, verify a zero-spend account limit or that no billable overage path is enabled. See [Render Free limits](https://render.com/docs/free).
 
 ## Automated CI and rate limits
 
-`.github/workflows/ci.yml` runs clean lockfile installs, backend/frontend tests, route checks, Expo dependency compatibility and web/Android JavaScript exports. It does not make signed APK/AABs, deploy services or exercise Android hardware. Authentication, payment and group limits currently use the backend process's in-memory express-rate-limit store; run one API instance or configure a shared store before scaling horizontally.
+`.github/workflows/ci.yml` runs clean lockfile installs, backend/frontend tests, route/import checks, native runtime compatibility, high-confidence secret scanning, Expo dependency compatibility, and web/Android/iOS JavaScript exports. `.github/workflows/eas-update.yml` only publishes when manually dispatched and affirmatively approved. Neither workflow signs APK/AABs, deploys Render services, nor exercises device hardware. Authentication, payment and group limits currently use the backend process's in-memory express-rate-limit store; stay on one API instance or configure a shared store before scaling horizontally.
 
 ## Backup and recovery
 
@@ -86,6 +119,7 @@ eas build --platform android --profile production
 - Before any index/schema migration, review impact, back up and test restore. No destructive migration is included in this change.
 - Keep order item snapshots, catalogue and order records; never run development seed/reset scripts against staging/production.
 - Follow owner-approved retention for payment verification records; never store card credentials in Wrapchik.
+- A hosted-catalogue import remains blocked until the source inventory is available and you explicitly approve the catalogue-only copy. No database records were changed.
 
 Before a production release, review the non-destructive additive index previews (`npm run db:query-indexes` and `npm run db:loyalty-indexes`) against the intended database. Apply only to the target database after the duplicate/conflict checks pass. Production Mongoose auto-indexing is disabled; no collection is dropped or reseeded by these scripts.
 

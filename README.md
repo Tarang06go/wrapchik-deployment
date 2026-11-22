@@ -183,7 +183,7 @@ The API base URL must not include `/api`; the app appends it. For web on the lap
 
 ### Environment variables
 
-`backend/.env.example` lists supported settings with placeholders. Create or edit `backend/.env` without replacing an existing file. Real email OTP uses backend-only Gmail SMTP settings (`SMTP_USER`, `SMTP_APP_PASSWORD`); optional Resend fallback uses `RESEND_API_KEY` and `EMAIL_FROM`. No payment-provider credentials are required for new checkout. An administrator configures the outlet's official UPI ID and payee name in Admin Settings, then enables UPI; the backend generates an amount-and-order-specific QR. Cash can be enabled or disabled there too. Do not commit `.env` files or put private credentials in the Expo frontend.
+`backend/.env.example` lists supported settings with placeholders. Create or edit `backend/.env` without replacing an existing file. Local email OTP supports backend-only Gmail SMTP (`SMTP_USER`, `SMTP_APP_PASSWORD`) and Resend HTTPS (`RESEND_API_KEY`, `EMAIL_FROM`). For a hosted Render Free backend, use Resend HTTPS because outbound SMTP ports are blocked. No payment-provider credentials are required for new checkout. An administrator configures the outlet's official UPI ID and payee name in Admin Settings, then enables UPI; the backend generates an amount-and-order-specific QR. Cash can be enabled or disabled there too. Do not commit `.env` files or put private credentials in the Expo frontend.
 
 OTP sign-in, signup verification, and password recovery use email. Phone numbers remain required profile data for compatibility with existing accounts; they are not used for OTP delivery.
 

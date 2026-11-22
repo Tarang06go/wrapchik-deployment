@@ -4,7 +4,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { ShoppingBag } from 'lucide-react-native';
 import COLORS from '../../constants/colors';
 
-export default function ProductImage({ uri, style, fallbackIconSize = 24, accessibilityLabel }) {
+export default function ProductImage({ uri, style, fallbackIconSize = 24, accessibilityLabel, transition = 120 }) {
   const [failedUri, setFailedUri] = useState('');
   const showImage = typeof uri === 'string' && uri.trim() && failedUri !== uri;
 
@@ -19,10 +19,11 @@ export default function ProductImage({ uri, style, fallbackIconSize = 24, access
   return (
     <ExpoImage
       source={{ uri }}
+      recyclingKey={uri}
       style={style}
       contentFit="cover"
       cachePolicy="memory-disk"
-      transition={120}
+      transition={transition}
       accessibilityLabel={accessibilityLabel}
       onError={() => setFailedUri(uri)}
     />

@@ -14,6 +14,10 @@ const getUpiInstructions = async (req, res, next) => {
     if (String(order.userId) !== String(req.user._id) && req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Unauthorized.' });
     if (order.paymentMethod !== 'UPI_QR') return res.status(400).json({ success: false, message: 'This order does not use UPI.' });
     if (['CANCELLED', 'REJECTED'].includes(order.orderStatus)) return res.status(409).json({ success: false, message: 'This order is closed.' });
+    if (order.orderStatus !== 'PLACED') return res.status(409).json({ success: false, message: 'Payment retry is available only while this order is waiting for outlet acceptance.' });
+    if (order.paymentStatus === 'SUCCESS') return res.status(409).json({ success: false, message: 'This order is already paid.' });
+    const pendingClaim = await Payment.findOne({ orderId: order._id, method: 'UPI_QR', status: 'PENDING', upiTransactionReference: { $type: 'string' } }).select('_id');
+    if (pendingClaim) return res.status(409).json({ success: false, message: 'A UPI reference is awaiting outlet verification. Do not pay again; refresh your order status.' });
     const settings = await RestaurantSettings.getSettings();
     if (!isUpiConfigured(settings)) return res.status(503).json({ success: false, message: 'UPI payment is not enabled or configured by the outlet.' });
     const upiUri = createUpiPaymentUri({ upiId: settings.upiId, payeeName: settings.upiPayeeName, amount: order.totalAmount, orderId: order._id, orderNumber: order.orderNumber });

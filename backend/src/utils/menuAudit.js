@@ -12,6 +12,13 @@ const inspectMenu = ({ products = [], categories = [], referenceItems = null, kn
       names.set(key, matches);
     }
     if (!String(product.imageUrl || '').trim()) findings.push({ type: 'missing_image', product: product.name || String(product._id) });
+    else {
+      try {
+        const image = new URL(String(product.imageUrl));
+        if (image.protocol !== 'https:') findings.push({ type: 'insecure_image_url', product: product.name || String(product._id) });
+      } catch { findings.push({ type: 'invalid_image_url', product: product.name || String(product._id) }); }
+    }
+    if (product.isVeg !== true && product.isVeg !== false) findings.push({ type: 'incomplete_dietary_classification', product: product.name || String(product._id) });
     const categoryName = categoryById.get(String(product.categoryId?._id || product.categoryId));
     if (!categoryName) findings.push({ type: 'missing_category', product: product.name || String(product._id) });
     else if (knownCategories.length && !knownCategories.some((known) => normalizeName(known) === normalizeName(categoryName))) findings.push({ type: 'unknown_category', product: product.name || String(product._id), category: categoryName });

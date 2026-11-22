@@ -1,4 +1,4 @@
-const healthStatus = (databaseReadyState) => {
+const readinessStatus = (databaseReadyState) => {
   const connected = databaseReadyState === 1;
   return {
     httpStatus: connected ? 200 : 503,
@@ -10,4 +10,13 @@ const healthStatus = (databaseReadyState) => {
   };
 };
 
-module.exports = healthStatus;
+const livenessStatus = () => ({
+  httpStatus: 200,
+  body: {
+    status: 'ok',
+    service: 'live',
+    timestamp: new Date().toISOString(),
+  },
+});
+
+module.exports = { readinessStatus, livenessStatus };

@@ -75,6 +75,8 @@ const restaurantSettingsSchema = new mongoose.Schema(
     scheduledPickupEnabled: { type: Boolean, default: false },
     pickupSlotMinutes: { type: Number, enum: [15, 30, 60], default: 15 },
     pickupSlotCapacity: { type: Number, min: 1, max: 100, default: 4 },
+    // Optional admin-configured campus pickup point; blank keeps the documented TIET counter fallback.
+    pickupLocation: { type: String, default: '', trim: true, maxlength: 200 },
     deliveryFee: {
       type: Number,
       default: 20,

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { AuthContext } from './AuthContext';
 import safeStorage from '../services/safeStorage';
 
@@ -41,7 +41,7 @@ export const CartProvider = ({ children }) => {
   }, [cartItems, loadedStorageKey, storageKey]);
 
   // Add item to cart with customization matching
-  const addToCart = (product, selectedCustomizations = [], quantity = 1) => {
+  const addToCart = useCallback((product, selectedCustomizations = [], quantity = 1) => {
     setCartItems((prevItems) => {
       // Calculate unit price with customizations
       const custPrice = selectedCustomizations.reduce((sum, c) => sum + c.price, 0);
@@ -77,10 +77,14 @@ export const CartProvider = ({ children }) => {
         ];
       }
     });
-  };
+  }, []);
+
+  const removeFromCart = useCallback((cartKey) => {
+    setCartItems((prevItems) => prevItems.filter((item) => item.cartKey !== cartKey));
+  }, []);
 
   // Update item quantity
-  const updateQuantity = (cartKey, newQuantity) => {
+  const updateQuantity = useCallback((cartKey, newQuantity) => {
     if (newQuantity <= 0) {
       removeFromCart(cartKey);
       return;
@@ -91,12 +95,7 @@ export const CartProvider = ({ children }) => {
         item.cartKey === cartKey ? { ...item, quantity: newQuantity } : item
       )
     );
-  };
-
-  // Remove single item from cart
-  const removeFromCart = (cartKey) => {
-    setCartItems((prevItems) => prevItems.filter((item) => item.cartKey !== cartKey));
-  };
+  }, [removeFromCart]);
 
   // Clear entire cart
   const clearCart = useCallback(async () => {
@@ -108,26 +107,33 @@ export const CartProvider = ({ children }) => {
     }
   }, [storageKey]);
 
-  // Calculations
-  const cartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
-  const subtotal = cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  // Calculate cart totals and the common product lookup in one pass.
+  const { cartCount, subtotal, cartItemByProductId } = useMemo(() => {
+    const result = { cartCount: 0, subtotal: 0, cartItemByProductId: new Map() };
+    for (const item of cartItems) {
+      result.cartCount += item.quantity;
+      result.subtotal += item.unitPrice * item.quantity;
+      if (!result.cartItemByProductId.has(item.productId)) result.cartItemByProductId.set(item.productId, item);
+    }
+    return result;
+  }, [cartItems]);
   const taxAndFees = Math.round(subtotal * 0.05); // 5% GST
   const grandTotal = subtotal + taxAndFees;
+  const value = useMemo(() => ({
+    cartItems,
+    cartItemByProductId,
+    cartCount,
+    subtotal,
+    taxAndFees,
+    grandTotal,
+    addToCart,
+    updateQuantity,
+    removeFromCart,
+    clearCart,
+  }), [cartItems, cartItemByProductId, cartCount, subtotal, taxAndFees, grandTotal, addToCart, updateQuantity, removeFromCart, clearCart]);
 
   return (
-    <CartContext.Provider
-      value={{
-        cartItems,
-        cartCount,
-        subtotal,
-        taxAndFees,
-        grandTotal,
-        addToCart,
-        updateQuantity,
-        removeFromCart,
-        clearCart,
-      }}
-    >
+    <CartContext.Provider value={value}>
       {children}
     </CartContext.Provider>
   );

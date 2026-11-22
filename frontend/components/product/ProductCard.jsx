@@ -6,35 +6,106 @@ import ProductImage from '../common/ProductImage';
 import { isProductAvailable } from '../../utils/productAvailability';
 import { addToCartHaptic } from '../../utils/haptics';
 import COLORS from '../../constants/colors';
+import { useReducedMotion } from '../../utils/reducedMotion';
 
-const ProductCard = ({ product, onPress }) => {
-  const { cartItems, addToCart, updateQuantity, removeFromCart } = useContext(CartContext);
+const ProductCardPresentation = React.memo(function ProductCardPresentation({
+  product, onPress, compact, isAvailable, existingItem, quantityInCart,
+  reduceMotion, entrance, stepperScale, handleAdd, handleIncrement, handleDecrement,
+}) {
+  return (
+    <Animated.View style={[styles.card, compact && styles.cardCompact, !isAvailable && styles.cardUnavailable, { opacity: entrance, transform: [{ translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [7, 0] }) }] }]}>
+      <TouchableOpacity
+        onPress={onPress}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel={`View ${product.name} details`}
+        style={[styles.imageContainer, compact && styles.imageContainerCompact]}
+      >
+        <ProductImage uri={product.imageUrl} style={styles.image} fallbackIconSize={compact ? 21 : 26} accessibilityLabel={product.name} transition={reduceMotion ? 0 : 150} />
+        {typeof product.isVeg === 'boolean' && <View style={[styles.vegBadge, { borderColor: product.isVeg ? COLORS.vegGreen : COLORS.nonVegRed }]}>
+          <View style={[styles.vegDot, { backgroundColor: product.isVeg ? COLORS.vegGreen : COLORS.nonVegRed }]} />
+        </View>}
+        {!isAvailable && <View style={styles.unavailableOverlay}><Text style={styles.unavailableText}>Currently Unavailable</Text></View>}
+      </TouchableOpacity>
+
+      <View style={styles.content}>
+        <TouchableOpacity onPress={onPress} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={`View ${product.name} details`}>
+          <Text style={[styles.name, compact && styles.nameCompact]} numberOfLines={compact ? 2 : 1}>{product.name}</Text>
+          {!compact && !!product.description?.trim() && <Text style={styles.description} numberOfLines={2}>{product.description}</Text>}
+        </TouchableOpacity>
+        <View style={[styles.footer, compact && styles.footerCompact]}>
+          <Text style={[styles.price, compact && styles.priceCompact]}>₹{product.price}</Text>
+          {quantityInCart > 0 && isAvailable ? (
+            <Animated.View style={[styles.stepperBox, compact && styles.stepperBoxCompact, { transform: [{ scale: stepperScale }] }]}>
+              <TouchableOpacity onPress={handleDecrement} style={[styles.stepperBtn, compact && styles.stepperBtnCompact]} accessibilityRole="button" accessibilityLabel={`Remove one ${product.name}`}>
+                <Minus size={14} color={COLORS.primary} />
+              </TouchableOpacity>
+              <Text style={styles.stepperQty}>{quantityInCart}</Text>
+              <TouchableOpacity onPress={handleIncrement} disabled={quantityInCart >= 50} style={[styles.stepperBtn, compact && styles.stepperBtnCompact]} accessibilityRole="button" accessibilityLabel={`Add one ${product.name}`}>
+                <Plus size={14} color={COLORS.primary} />
+              </TouchableOpacity>
+            </Animated.View>
+          ) : (
+            <TouchableOpacity onPress={handleAdd} disabled={!isAvailable} accessibilityRole="button" accessibilityLabel={isAvailable ? `Add ${product.name} to cart` : `${product.name} unavailable`} style={[styles.addBtn, compact && styles.addBtnCompact, !isAvailable && styles.addBtnDisabled]}>
+              <Plus size={16} color={isAvailable ? '#FFFFFF' : '#9E9E9E'} />
+              <Text style={[styles.addBtnText, compact && styles.addBtnTextCompact, !isAvailable && styles.addBtnTextDisabled]}>ADD</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    </Animated.View>
+  );
+});
+
+const ProductCard = ({ product, onPress, compact = false }) => {
+  const { cartItemByProductId, addToCart, updateQuantity, removeFromCart } = useContext(CartContext);
 
   const isAvailable = isProductAvailable(product);
 
   // Check if product already exists in cart
-  const existingItem = cartItems.find((item) => item.productId === product._id);
+  const existingItem = cartItemByProductId?.get(product._id);
   const quantityInCart = existingItem ? existingItem.quantity : 0;
   const previousQuantity = useRef(quantityInCart);
   const stepperScale = useRef(new Animated.Value(1)).current;
+  const entrance = useRef(new Animated.Value(1)).current;
+  const reduceMotionRef = useRef(true);
+  const reduceMotion = useReducedMotion();
+  reduceMotionRef.current = reduceMotion;
+
+  useEffect(() => {
+    if (reduceMotion !== false) {
+      entrance.stopAnimation();
+      entrance.setValue(1);
+      stepperScale.stopAnimation();
+      stepperScale.setValue(1);
+      return undefined;
+    }
+    entrance.setValue(0);
+    const animation = Animated.timing(entrance, { toValue: 1, duration: 220, useNativeDriver: true });
+    animation.start();
+    return () => { animation.stop(); entrance.stopAnimation(); };
+  }, [entrance, reduceMotion, stepperScale]);
 
   useEffect(() => {
     if (quantityInCart > previousQuantity.current) {
-      stepperScale.setValue(0.88);
-      Animated.spring(stepperScale, { toValue: 1, friction: 5, tension: 180, useNativeDriver: true }).start();
+      if (reduceMotionRef.current) stepperScale.setValue(1);
+      else {
+        stepperScale.setValue(0.88);
+        Animated.spring(stepperScale, { toValue: 1, friction: 5, tension: 180, useNativeDriver: true }).start();
+      }
     }
     previousQuantity.current = quantityInCart;
   }, [quantityInCart, stepperScale]);
 
-  const handleAdd = (e) => {
+  const handleAdd = React.useCallback((e) => {
     e?.stopPropagation?.();
     if (isAvailable) {
       addToCart(product, [], 1);
       addToCartHaptic();
     }
-  };
+  }, [addToCart, isAvailable, product]);
 
-  const handleIncrement = (e) => {
+  const handleIncrement = React.useCallback((e) => {
     e?.stopPropagation?.();
     if (existingItem) {
       if (quantityInCart < 50) updateQuantity(existingItem.cartKey, quantityInCart + 1);
@@ -42,9 +113,9 @@ const ProductCard = ({ product, onPress }) => {
       addToCart(product, [], 1);
     }
     if (isAvailable && quantityInCart < 50) addToCartHaptic();
-  };
+  }, [addToCart, existingItem, isAvailable, product, quantityInCart, updateQuantity]);
 
-  const handleDecrement = (e) => {
+  const handleDecrement = React.useCallback((e) => {
     e?.stopPropagation?.();
     if (existingItem) {
       if (quantityInCart > 1) {
@@ -53,67 +124,10 @@ const ProductCard = ({ product, onPress }) => {
         removeFromCart(existingItem.cartKey);
       }
     }
-  };
+  }, [existingItem, quantityInCart, removeFromCart, updateQuantity]);
 
   return (
-    <View style={[styles.card, !isAvailable && styles.cardUnavailable]}>
-      <TouchableOpacity
-        onPress={onPress}
-        activeOpacity={0.8}
-        accessibilityRole="button"
-        accessibilityLabel={`View ${product.name} details`}
-        style={styles.imageContainer}
-      >
-        <ProductImage uri={product.imageUrl} style={styles.image} fallbackIconSize={26} accessibilityLabel={product.name} />
-        {typeof product.isVeg === 'boolean' && <View style={[styles.vegBadge, { borderColor: product.isVeg ? COLORS.vegGreen : COLORS.nonVegRed }]}>
-          <View style={[styles.vegDot, { backgroundColor: product.isVeg ? COLORS.vegGreen : COLORS.nonVegRed }]} />
-        </View>}
-
-        {!isAvailable && (
-          <View style={styles.unavailableOverlay}>
-            <Text style={styles.unavailableText}>Currently Unavailable</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-
-      <View style={styles.content}>
-        <TouchableOpacity onPress={onPress} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={`View ${product.name} details`}>
-          <Text style={styles.name} numberOfLines={1}>
-            {product.name}
-          </Text>
-          {!!product.description?.trim() && <Text style={styles.description} numberOfLines={2}>{product.description}</Text>}
-        </TouchableOpacity>
-
-        <View style={styles.footer}>
-          <Text style={styles.price}>₹{product.price}</Text>
-
-          {quantityInCart > 0 && isAvailable ? (
-            <Animated.View style={[styles.stepperBox, { transform: [{ scale: stepperScale }] }]}>
-              <TouchableOpacity onPress={handleDecrement} style={styles.stepperBtn} accessibilityRole="button" accessibilityLabel={`Remove one ${product.name}`}>
-                <Minus size={14} color={COLORS.primary} />
-              </TouchableOpacity>
-              <Text style={styles.stepperQty}>{quantityInCart}</Text>
-              <TouchableOpacity onPress={handleIncrement} disabled={quantityInCart >= 50} style={styles.stepperBtn} accessibilityRole="button" accessibilityLabel={`Add one ${product.name}`}>
-                <Plus size={14} color={COLORS.primary} />
-              </TouchableOpacity>
-            </Animated.View>
-          ) : (
-            <TouchableOpacity
-              onPress={handleAdd}
-              disabled={!isAvailable}
-              accessibilityRole="button"
-              accessibilityLabel={isAvailable ? `Add ${product.name} to cart` : `${product.name} unavailable`}
-              style={[styles.addBtn, !isAvailable && styles.addBtnDisabled]}
-            >
-              <Plus size={16} color={isAvailable ? '#FFFFFF' : '#9E9E9E'} />
-              <Text style={[styles.addBtnText, !isAvailable && styles.addBtnTextDisabled]}>
-                ADD
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-    </View>
+    <ProductCardPresentation product={product} onPress={onPress} compact={compact} isAvailable={isAvailable} existingItem={existingItem} quantityInCart={quantityInCart} reduceMotion={reduceMotion} entrance={entrance} stepperScale={stepperScale} handleAdd={handleAdd} handleIncrement={handleIncrement} handleDecrement={handleDecrement} />
   );
 };
 
@@ -132,6 +146,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+  cardCompact: { borderRadius: 14, marginBottom: 8, padding: 8, shadowOpacity: 0.035, shadowRadius: 3, elevation: 1 },
   cardUnavailable: {
     opacity: 0.75,
     backgroundColor: '#F9FAFB',
@@ -143,6 +158,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
+  imageContainerCompact: { width: 76, height: 76, borderRadius: 11 },
   image: {
     width: '100%',
     height: '100%',
@@ -188,6 +204,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.textPrimary,
   },
+  nameCompact: { fontSize: 14, lineHeight: 18, minHeight: 36 },
   description: {
     fontSize: 13,
     color: COLORS.textSecondary,
@@ -200,11 +217,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 8,
   },
+  footerCompact: { marginTop: 3, minHeight: 40 },
   price: {
     fontSize: 17,
     fontWeight: '800',
     color: COLORS.primary,
   },
+  priceCompact: { fontSize: 15 },
   addBtn: {
     backgroundColor: COLORS.primary,
     flexDirection: 'row',
@@ -214,6 +233,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 4,
   },
+  addBtnCompact: { minWidth: 64, minHeight: 44, justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 9 },
+  addBtnTextCompact: { fontSize: 11 },
   addBtnDisabled: {
     backgroundColor: '#E0E0E0',
   },
@@ -235,12 +256,14 @@ const styles = StyleSheet.create({
     height: 32,
     paddingHorizontal: 4,
   },
+  stepperBoxCompact: { height: 44, paddingHorizontal: 2 },
   stepperBtn: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  stepperBtnCompact: { minWidth: 36, minHeight: 40, paddingHorizontal: 7, paddingVertical: 6 },
   stepperQty: {
     fontSize: 14,
     fontWeight: '900',

@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { UtensilsCrossed } from 'lucide-react-native';
 import COLORS from '../../constants/colors';
 import { selectionHaptic } from '../../utils/haptics';
@@ -15,7 +16,7 @@ const CategoryCard = ({ category, isSelected, onPress }) => {
       style={[styles.card, isSelected && styles.cardSelected]}
     >
       <View style={[styles.imageContainer, isSelected && styles.imageSelected]}>
-        {category.imageUrl ? <Image source={{ uri: category.imageUrl }} style={styles.image} resizeMode="cover" /> : <UtensilsCrossed size={23} color={isSelected ? COLORS.primary : COLORS.textSecondary} />}
+        {category.imageUrl ? <ExpoImage source={{ uri: category.imageUrl }} style={styles.image} contentFit="cover" cachePolicy="memory-disk" transition={100} /> : <UtensilsCrossed size={21} color={isSelected ? COLORS.primary : COLORS.textSecondary} />}
       </View>
       <Text style={[styles.name, isSelected && styles.nameSelected]} numberOfLines={1}>
         {category.name}
@@ -28,19 +29,19 @@ const styles = StyleSheet.create({
   card: {
     alignItems: 'center',
     marginRight: 12,
-    width: 78,
+    width: 68,
   },
   cardSelected: {
     transform: [{ scale: 1.05 }],
   },
   imageContainer: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     overflow: 'hidden',
     borderWidth: 2,
     borderColor: COLORS.border,
-    marginBottom: 6,
+    marginBottom: 4,
     backgroundColor: '#FFFFFF',
   },
   image: {
@@ -49,7 +50,8 @@ const styles = StyleSheet.create({
   },
   imageSelected: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryLight },
   name: {
-    fontSize: 13,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '600',
     color: COLORS.textSecondary,
     textAlign: 'center',

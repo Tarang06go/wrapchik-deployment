@@ -1,19 +1,24 @@
 const express = require('express');
 const router = express.Router();
 const {
-  createGroup, joinGroup, getGroupDetails, lockGroup, leaveGroup, removeGroupMember,
+  createGroup, joinGroup, getMyGroups, getGroupSummary, getGroupActivity, getGroupDetails, lockGroup, leaveGroup, removeGroupMember,
   addGroupItem, updateGroupItem, configureGroupItemSharing, acceptGroupItemShare, removeGroupItem,
 } = require('../controllers/groupOrderController');
 const {
   previewGroupCheckout, checkoutGroup, getContributionInstructions, submitContributionReference,
   getPendingGroupContributions, reviewGroupContribution, reconcileGroupPayment,
 } = require('../controllers/groupCheckoutController');
+const { sendGroupPaymentReminder } = require('../controllers/groupReminderController');
 const { protect, adminOnly } = require('../middleware/authMiddleware');
 
 router.post('/', protect, createGroup);
 router.post('/join', protect, joinGroup);
+router.get('/mine', protect, getMyGroups);
 router.get('/admin/contributions/pending', protect, adminOnly, getPendingGroupContributions);
 router.post('/admin/:id/reconcile-payment', protect, adminOnly, reconcileGroupPayment);
+router.get('/:id/summary', protect, getGroupSummary);
+router.get('/:id/activity', protect, getGroupActivity);
+router.post('/:id/payment-reminders', protect, sendGroupPaymentReminder);
 router.get('/:id', protect, getGroupDetails);
 router.post('/:id/lock', protect, lockGroup);
 router.post('/:id/quote', protect, previewGroupCheckout);

@@ -10,10 +10,14 @@ const http = require('http');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const socketManager = require('./config/socketManager');
+const { assertDemoSeedTarget } = require('./utils/demoSeedSafety');
+const { parseCorsOrigins } = require('./utils/corsOrigins');
+const { assertProductionDatabaseUri } = require('./utils/runtimeConfig');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   throw new Error('JWT_SECRET must be set to a random value of at least 32 characters');
 }
+assertProductionDatabaseUri(process.env.MONGO_URI, process.env.NODE_ENV);
 if (process.env.LOCAL_OTP_ENABLED === 'true' && process.env.NODE_ENV !== 'development') {
   throw new Error('LOCAL_OTP_ENABLED is allowed only when NODE_ENV=development');
 }
@@ -34,15 +38,7 @@ app.use(
   })
 );
 
-const configuredOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
-  : null;
-if (process.env.NODE_ENV === 'production' && configuredOrigins?.includes('*')) {
-  throw new Error('CORS_ORIGIN must list explicit origins in production');
-}
-if (process.env.NODE_ENV === 'production' && !configuredOrigins?.length) {
-  throw new Error('CORS_ORIGIN must contain comma-separated approved origins in production');
-}
+const configuredOrigins = parseCorsOrigins(process.env.CORS_ORIGIN, process.env.NODE_ENV);
 const corsOrigin = configuredOrigins || (process.env.NODE_ENV === 'development' ? true : false);
 app.use(cors({ origin: corsOrigin }));
 
@@ -86,10 +82,16 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get(['/health', '/api/health'], (req, res) => {
+app.get('/health', (req, res) => {
+  const { livenessStatus } = require('./utils/healthStatus');
+  const result = livenessStatus();
+  res.status(result.httpStatus).json(result.body);
+});
+
+app.get(['/ready', '/api/ready', '/api/health'], (req, res) => {
   const mongoose = require('mongoose');
-  const healthStatus = require('./utils/healthStatus');
-  const result = healthStatus(mongoose.connection.readyState);
+  const { readinessStatus } = require('./utils/healthStatus');
+  const result = readinessStatus(mongoose.connection.readyState);
   res.status(result.httpStatus).json(result.body);
 });
 
@@ -113,8 +115,8 @@ app.use('/api/loyalty', require('./routes/loyaltyRoutes'));
 // Seeder function
 const seedInitialData = async () => {
   try {
-    if (process.env.SEED_SAMPLE_CATALOGUE === 'true' && process.env.NODE_ENV !== 'development') {
-      throw new Error('SEED_SAMPLE_CATALOGUE is allowed only in development');
+    if (process.env.SEED_SAMPLE_CATALOGUE === 'true' || process.env.SEED_DEMO_ACCOUNTS === 'true') {
+      assertDemoSeedTarget(process.env.MONGO_URI, process.env.NODE_ENV);
     }
     const Category = require('./models/Category');
     const Product = require('./models/Product');
@@ -201,6 +203,7 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 const httpServer = http.createServer(app);
 let groupExpiryTimer;
+let databaseInitializationStarted = false;
 const io = new Server(httpServer, {
   cors: { origin: configuredOrigins || (process.env.NODE_ENV === 'development' ? '*' : false), methods: ['GET', 'POST'] },
 });
@@ -238,23 +241,54 @@ io.on('connection', (socket) => {
 });
 
 const startServer = async () => {
-  await connectDB();
-  await seedInitialData();
-
   return new Promise((resolve, reject) => {
-    httpServer.once('error', reject);
+    const onError = (error) => reject(error);
+    httpServer.once('error', onError);
     httpServer.listen(PORT, '0.0.0.0', () => {
+      httpServer.off('error', onError);
       if (!groupExpiryTimer) {
         const runExpirySweep = () => require('./services/groupExpirySweeper').sweepExpiredGroups()
-          .catch(error => console.error(`[Group expiry] ${error.message}`));
+          .catch(() => console.error('[Group expiry] Sweep unavailable; it will retry on the next interval.'));
         runExpirySweep();
         groupExpiryTimer = setInterval(runExpirySweep, 60 * 1000);
         groupExpiryTimer.unref?.();
       }
       console.log(`[Wrapchik Server] Running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
-      resolve();
+      if (!databaseInitializationStarted) {
+        databaseInitializationStarted = true;
+        void initializeDatabaseWithRetry();
+      }
+      resolve(httpServer);
     });
   });
+};
+
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+// Bind HTTP first so Render liveness checks succeed during Atlas cold starts/outages.
+// MongoDB failures are retried with capped backoff; no request or health probe waits here.
+const initializeDatabaseWithRetry = async () => {
+  let attempt = 0;
+  while (true) {
+    try {
+      await connectDB();
+      break;
+    } catch (_) {
+      attempt += 1;
+      const delayMs = Math.min(30_000, 1_000 * (2 ** Math.min(attempt - 1, 5)));
+      console.error(`[MongoDB] Initial connection unavailable; retrying in ${Math.ceil(delayMs / 1000)}s.`);
+      await wait(delayMs);
+    }
+  }
+
+  try {
+    await seedInitialData();
+    await require('./services/groupExpirySweeper').sweepExpiredGroups();
+  } catch (_) {
+    // Keep liveness available; readiness reports DB connectivity and routes surface their
+    // own errors. Avoid logging driver details that could disclose deployment credentials.
+    console.error('[Startup] Database-connected initialization did not finish; inspect server configuration.');
+  }
 };
 
 if (require.main === module) {

@@ -18,9 +18,9 @@ const CATEGORIES = [
 ];
 
 export default function ReportIssueScreen() {
-  const { orderId } = useLocalSearchParams();
+  const { orderId, category: initialCategory } = useLocalSearchParams();
   const router = useRouter();
-  const [category, setCategory] = useState(CATEGORIES[0].id);
+  const [category, setCategory] = useState(Array.isArray(initialCategory) ? initialCategory[0] : initialCategory === 'LATE' ? 'LATE' : CATEGORIES[0].id);
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [focused, setFocused] = useState(false);

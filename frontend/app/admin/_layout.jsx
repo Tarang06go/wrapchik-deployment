@@ -1,10 +1,12 @@
 import React, { useContext, useEffect } from 'react';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, usePathname, useRouter } from 'expo-router';
 import { AuthContext } from '../../context/AuthContext';
 import LoadingIndicator from '../../components/common/LoadingIndicator';
+import RouteErrorBoundary from '../../components/common/RouteErrorBoundary';
 
 export default function AdminLayout() {
   const router = useRouter();
+  const pathname = usePathname();
   const { user, isLoading } = useContext(AuthContext);
 
   useEffect(() => {
@@ -13,5 +15,7 @@ export default function AdminLayout() {
   }, [isLoading, router, user?.role]);
 
   if (isLoading || user?.role !== 'admin') return <LoadingIndicator message="Checking administrator access…" />;
-  return <Stack screenOptions={{ headerShown: false, animation: 'fade' }} initialRouteName="dashboard" />;
+  return <RouteErrorBoundary key={pathname}>
+    <Stack screenOptions={{ headerShown: false, animation: 'fade' }} initialRouteName="dashboard" />
+  </RouteErrorBoundary>;
 }

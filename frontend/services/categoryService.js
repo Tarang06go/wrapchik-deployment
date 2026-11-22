@@ -1,20 +1,21 @@
 import api from './api';
+import { cachedRead, invalidateReadCache } from './readCache';
+
+const changed = promise => promise.then(result => { invalidateReadCache('catalog:'); return result; });
 
 const categoryService = {
-  getCategories: () => {
-    return api.get('/categories');
-  },
+  getCategories: () => cachedRead('catalog:categories', () => api.get('/categories'), 60_000),
 
   createCategory: (categoryData) => {
-    return api.post('/categories', categoryData);
+    return changed(api.post('/categories', categoryData));
   },
 
   updateCategory: (id, categoryData) => {
-    return api.put(`/categories/${id}`, categoryData);
+    return changed(api.put(`/categories/${id}`, categoryData));
   },
 
   deleteCategory: (id) => {
-    return api.delete(`/categories/${id}`);
+    return changed(api.delete(`/categories/${id}`));
   },
 };
 

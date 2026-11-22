@@ -5,7 +5,7 @@ import COLORS from '../../constants/colors';
 
 const FulfillmentSelector = ({ selectedMode, onSelectMode, settings }) => {
   const modes = [
-    { id: 'TAKEAWAY', title: 'Pickup', desc: 'SAC counter', icon: ShoppingBag, enabled: settings?.takeawayEnabled === true },
+    { id: 'TAKEAWAY', title: 'Pickup', desc: settings?.pickupLocation?.trim() ? 'Configured campus point' : 'SAC counter', icon: ShoppingBag, enabled: settings?.takeawayEnabled === true },
     { id: 'DELIVERY', title: 'Delivery', desc: 'Hostel', icon: Truck, enabled: settings?.deliveryEnabled === true },
     { id: 'DINE_IN', title: 'Dine in', desc: 'At table', icon: UtensilsCrossed, enabled: settings?.dineInEnabled === true },
   ];

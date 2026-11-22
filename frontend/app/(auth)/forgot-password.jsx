@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, ShieldCheck } from 'lucide-react-native';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
@@ -10,7 +10,9 @@ import { canSendPasswordResetCode, normalizePasswordResetSend } from '../../util
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
+  const params = useLocalSearchParams();
+  const routeEmail = Array.isArray(params.email) ? params.email[0] : params.email;
+  const [email, setEmail] = useState(typeof routeEmail === 'string' ? routeEmail : '');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -134,7 +136,7 @@ export default function ForgotPasswordScreen() {
             </>
           )}
 
-          {notice ? <Text accessibilityRole="status" style={styles.notice}>{notice}</Text> : null}
+          {notice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text> : null}
           {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
           <View style={styles.securityRow}>
             <ShieldCheck size={15} color={COLORS.success} />

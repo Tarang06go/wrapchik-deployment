@@ -8,7 +8,7 @@ const TAKEAWAY_STEPS = [
   { status: 'ACCEPTED', title: 'Order Accepted', desc: 'Order confirmed by Wrapchik kitchen', Icon: CircleDot },
   { status: 'PREPARING', title: 'Preparing Food', desc: 'Chef is wrapping your fresh food', Icon: CookingPot },
   { status: 'READY', title: 'Ready for Pickup', desc: 'Head to Wrapchik SAC counter!', Icon: PackageCheck },
-  { status: 'COMPLETED', title: 'Order Completed', desc: 'Enjoy your fresh meal!', Icon: CheckCircle2 },
+  { status: 'COMPLETED', title: 'Collected', desc: 'Your pickup was confirmed by the outlet.', Icon: CheckCircle2 },
 ];
 
 const DELIVERY_STEPS = [

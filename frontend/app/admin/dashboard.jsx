@@ -1,13 +1,15 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ShoppingBag, Clock, CheckCircle2, IndianRupee, Layers, Package, ArrowRight, ChefHat, Settings, Utensils, Tag, Users } from 'lucide-react-native';
+import { ShoppingBag, Clock, CheckCircle2, IndianRupee, Layers, Package, ArrowRight, ChefHat, Settings, Utensils, Tag, Users, QrCode } from 'lucide-react-native';
 import Header from '../../components/common/Header';
-import LoadingIndicator from '../../components/common/LoadingIndicator';
 import adminService from '../../services/adminService';
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
 import COLORS from '../../constants/colors';
+import { isOrderOverdue } from '../../utils/orderAge';
+import AdminDrawer from '../../components/admin/AdminDrawer';
+import { AdminCard, AdminChip, AdminLoadingState } from '../../components/admin/AdminPrimitives';
 
 const currency = value => `₹${Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
@@ -21,6 +23,8 @@ export default function AdminDashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showMoreMetrics, setShowMoreMetrics] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const fetchOverview = useCallback(async () => {
     try {
@@ -51,24 +55,29 @@ export default function AdminDashboardScreen() {
     } finally { setSaving(false); }
   };
 
-  if (loading && !analytics) return <LoadingIndicator message="Loading shop dashboard…" />;
+  if (loading && !analytics) return <AdminLoadingState message="Loading shop dashboard…" />;
   const paymentCount = status => analytics?.paymentBreakdown?.find(row => row._id === status)?.count || 0;
   const orderCount = status => analytics?.statusBreakdown?.find(row => row._id === status)?.count || 0;
   const returning = analytics?.customerRepeatStats || { uniqueCustomers: 0, returningCustomers: 0 };
   const peakHour = analytics?.ordersByHour?.[0];
+  const queueStatuses = [['PLACED', 'New'], ['ACCEPTED', 'Accepted'], ['PREPARING', 'Preparing'], ['READY', 'Ready'], ['COMPLETED', 'Completed']];
+  const openQueue = status => router.push({ pathname: '/admin/orders', params: { status } });
+  const overdueInQueue = status => (analytics?.recentOrders || []).some(order => order.orderStatus === status && isOrderOverdue(order, settings?.orderOverdueMinutes || 30));
+  const activeKitchenOrders = ['PLACED', 'ACCEPTED', 'PREPARING'].reduce((total, status) => total + orderCount(status), 0);
+  const kitchenStatus = settings?.busyStatus || 'NORMAL';
   const trendChart = (title, rows, valueKey, formatter) => {
     const maximum = Math.max(1, ...(rows || []).map(row => Number(row[valueKey] || 0)));
     return <View style={styles.section}><Text style={styles.sectionTitle}>{title}</Text>{rows?.length ? rows.map(row => <View key={row._id} style={styles.trendRow}><Text style={styles.trendLabel}>{valueKey === 'orders' && /^\d+$/.test(String(row._id)) ? `${String(row._id).padStart(2, '0')}:00` : String(row._id).slice(5)}</Text><View style={styles.barTrack}><View style={[styles.bar, { width: `${Math.max(3, Number(row[valueKey] || 0) / maximum * 100)}%` }]} /></View><Text style={styles.trendValue}>{formatter(row[valueKey] || 0)}</Text></View>) : <Text style={styles.muted}>No data for this period.</Text>}</View>;
   };
   const metric = (label, value, detail, Icon, color) => (
-    <View style={styles.metricCard} key={label}>
+    <AdminCard style={styles.metricCard} key={label}>
       <View style={styles.metricTop}><View style={[styles.iconBox, { backgroundColor: `${color}18` }]}><Icon size={18} color={color} /></View><Text style={styles.metricValue}>{value}</Text></View>
       <Text style={styles.metricLabel}>{label}</Text><Text style={styles.metricDetail}>{detail}</Text>
-    </View>
+    </AdminCard>
   );
 
   return <View style={styles.container}>
-    <Header title="Wrapchik Operations" showBack showCart={false} />
+    <Header title="Wrapchik Operations" showMenu onMenuPress={() => setDrawerOpen(true)} showCart={false} />
     <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchOverview(); }} colors={[COLORS.primary]} />}>
       {!!error && <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text><TouchableOpacity onPress={() => { setLoading(true); fetchOverview(); }}><Text style={styles.retry}>Retry</Text></TouchableOpacity></View>}
       <View style={styles.pageIntro}><View><Text style={styles.eyebrow}>ADMINISTRATION · TIET PATIALA</Text><Text style={styles.pageTitle}>Today at a glance</Text></View>
@@ -76,17 +85,41 @@ export default function AdminDashboardScreen() {
       </View>
       <View style={styles.periodRow}>{[['today', 'Today'], ['7d', '7 days'], ['30d', '30 days']].map(([value, label]) => <TouchableOpacity key={value} onPress={() => setPeriod(value)} style={[styles.periodChip, period === value && styles.periodSelected]}><Text style={[styles.periodText, period === value && styles.periodTextSelected]}>{label}</Text></TouchableOpacity>)}</View>
       {analytics ? <>
-        <View style={styles.revenuePanel}><View><Text style={styles.revenueCaption}>PAID REVENUE · {period === 'today' ? 'TODAY' : period === '7d' ? 'LAST 7 DAYS' : 'LAST 30 DAYS'}</Text><Text style={styles.revenueAmount}>{currency(period === 'today' ? analytics.todayRevenue : analytics.periodRevenue)}</Text><Text style={styles.revenueSub}>{analytics.periodOrders} orders in selected period · all-time paid {currency(analytics.totalRevenue)}</Text></View><IndianRupee size={23} color="#fff" /></View>
         <View style={styles.metricsGrid}>
-          {metric('Orders today', analytics.todayOrders, 'All payment states', ShoppingBag, '#546B83')}
-          {metric('Awaiting acceptance', orderCount('PLACED'), 'New orders', Clock, '#C17A17')}
-          {metric('In preparation', orderCount('PREPARING'), 'Kitchen queue', ChefHat, '#D64B22')}
+          {metric('Today’s orders', analytics.todayOrders, 'All payment states', ShoppingBag, '#546B83')}
+          {metric('Pending orders', orderCount('PLACED'), 'Awaiting acceptance', Clock, '#C17A17')}
+          {metric('Paid revenue', currency(period === 'today' ? analytics.todayRevenue : analytics.periodRevenue), `${analytics.periodOrders} orders · all-time ${currency(analytics.totalRevenue)}`, IndianRupee, '#2F8B4E')}
+          {metric('Preparing', orderCount('PREPARING'), 'Kitchen queue', ChefHat, '#D64B22')}
+        </View>
+        <TouchableOpacity onPress={() => setShowMoreMetrics(value => !value)} style={styles.moreMetricsToggle} accessibilityRole="button" accessibilityLabel={showMoreMetrics ? 'Hide additional dashboard metrics' : 'Show additional dashboard metrics'}>
+          <Text style={styles.moreMetricsText}>{showMoreMetrics ? 'Hide details' : 'More performance metrics'}</Text>
+          <ArrowRight size={15} color={COLORS.primary} style={showMoreMetrics ? { transform: [{ rotate: '90deg' }] } : undefined} />
+        </TouchableOpacity>
+        {showMoreMetrics ? <View style={styles.metricsGrid}>
           {metric('Ready for pickup', orderCount('READY'), 'Awaiting collection', CheckCircle2, '#2F8B4E')}
           {metric('Completed', analytics.completedOrders, 'All time', CheckCircle2, '#2F8B4E')}
           {metric('Menu availability', `${analytics.availableProducts}/${analytics.totalProducts}`, `${analytics.unavailableProducts} unavailable`, Package, '#546B83')}
           {metric('Average paid order', currency(analytics.averageOrderValue), `${analytics.paidOrderCount} paid orders`, IndianRupee, '#546B83')}
           {metric('Returning customers', `${returning.returningCustomers}/${returning.uniqueCustomers}`, 'Customers with 2+ paid orders', ShoppingBag, '#546B83')}
           {metric('Peak ordering hour', peakHour ? `${String(peakHour._id).padStart(2, '0')}:00` : '—', peakHour ? `${peakHour.orders} orders · India time` : 'No orders in range', Clock, '#C17A17')}
+        </View> : null}
+        <View style={styles.queueSection}>
+          <Text style={styles.queueTitle}>Live order queue</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.queueRow}>
+            {queueStatuses.map(([status, label]) => {
+              const overdue = overdueInQueue(status);
+              return <AdminChip key={status} onPress={() => openQueue(status)} style={[styles.queueChip, overdue && styles.queueChipOverdue]} accessibilityLabel={`${label}: ${orderCount(status)} orders${overdue ? ', overdue' : ''}`}>
+                <Text style={[styles.queueLabel, overdue && styles.queueOverdueText]}>{label}</Text>
+                <Text style={[styles.queueCount, overdue && styles.queueOverdueText]}>{orderCount(status)}</Text>
+              </AdminChip>;
+            })}
+          </ScrollView>
+        </View>
+        <View style={styles.kitchenLoadCard} accessibilityLabel={`Kitchen load: ${activeKitchenOrders} active orders, outlet status ${kitchenStatus.replace('_', ' ').toLowerCase()}`}>
+          <View style={{ flex: 1 }}><Text style={styles.kitchenLoadTitle}>Kitchen load</Text><Text style={styles.kitchenLoadDetail}>{activeKitchenOrders} active orders waiting or in preparation</Text></View>
+          <TouchableOpacity onPress={() => router.push('/admin/settings')} style={[styles.kitchenStatus, kitchenStatus === 'VERY_BUSY' ? styles.kitchenVeryBusy : kitchenStatus === 'BUSY' ? styles.kitchenBusy : styles.kitchenNormal]} accessibilityRole="button" accessibilityLabel={`Kitchen load status ${kitchenStatus.replace('_', ' ').toLowerCase()}; open outlet settings`}>
+            <Text style={styles.kitchenStatusText}>{kitchenStatus.replace('_', ' ')}</Text>
+          </TouchableOpacity>
         </View>
         {trendChart('Paid revenue trend · selected period', analytics.revenueTrend, 'amount', currency)}
         {trendChart('Order volume trend · selected period', analytics.orderVolumeTrend, 'orders', value => `${value} orders`)}
@@ -104,19 +137,29 @@ export default function AdminDashboardScreen() {
         </View>
         <View style={styles.section}><Text style={styles.sectionTitle}>Recent orders</Text>{analytics.recentOrders?.length ? analytics.recentOrders.map(order => <TouchableOpacity key={order._id} onPress={() => router.push('/admin/orders')} style={styles.orderRow}><View style={{ flex: 1 }}><Text style={styles.orderTitle}>#{order.orderNumber} · {order.customerSnapshot?.name || 'Customer'}</Text><Text style={styles.orderMeta}>{order.orderType || 'TAKEAWAY'} · {new Date(order.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} · {order.paymentStatus || 'PENDING'}</Text></View><Text style={styles.orderAmount}>{currency(order.totalAmount)}</Text></TouchableOpacity>) : <Text style={styles.muted}>No orders recorded for this view yet.</Text>}</View>
       </> : null}
+      <TouchableOpacity onPress={() => router.push('/admin/pickup')} style={styles.pickupQuickAction} accessibilityRole="button" accessibilityLabel="Open QR pickup verification">
+        <View style={styles.pickupIcon}><QrCode size={21} color={COLORS.primary} /></View>
+        <View style={{ flex: 1 }}><Text style={styles.pickupTitle}>QR Pickup</Text><Text style={styles.pickupSubtitle}>Scan a customer code or verify it manually</Text></View>
+        <ArrowRight size={18} color="#8C929A" />
+      </TouchableOpacity>
       <Text style={styles.sectionHeading}>Manage outlet</Text>
       {[[ChefHat, 'Kitchen & orders', 'Review, accept and progress customer orders', '/admin/orders'], [Package, 'Menu products', 'Edit prices, customisations and availability', '/admin/products'], [Layers, 'Categories', 'Organise the outlet menu', '/admin/categories'], [Tag, 'Coupons & offers', 'Set eligibility, dates and usage limits', '/admin/coupons'], [Users, 'Customer insights', 'Review verified order totals and account access', '/admin/customers'], [Utensils, 'Dine-in tables', 'Create tables and manage current availability', '/admin/tables'], [Settings, 'Store settings', 'Hours, fulfilment, scheduling and preparation', '/admin/settings']].map(([Icon, title, subtitle, path]) => <TouchableOpacity key={title} onPress={() => router.push(path)} style={styles.actionRow}><View style={styles.actionIcon}><Icon size={20} color={COLORS.primary} /></View><View style={{ flex: 1 }}><Text style={styles.actionTitle}>{title}</Text><Text style={styles.actionSub}>{subtitle}</Text></View><ArrowRight size={18} color="#8C929A" /></TouchableOpacity>)}
       <TouchableOpacity onPress={async () => { await logout(); router.replace('/(auth)/login'); }} style={styles.logout}><Text style={styles.logoutText}>Log out</Text></TouchableOpacity>
     </ScrollView>
+    <AdminDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} />
   </View>;
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F6F4F1' }, content: { padding: 20, paddingBottom: 36, maxWidth: 1120, width: '100%', alignSelf: 'center' },
-  pageIntro: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginTop: 4, marginBottom: 16 }, eyebrow: { color: '#8A776A', fontSize: 10, fontWeight: '800', letterSpacing: 1.2 }, pageTitle: { fontSize: 25, fontWeight: '900', color: '#242A32', marginTop: 5 },
+  moreMetricsToggle: { minHeight: 48, marginTop: 7, paddingHorizontal: 3, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, moreMetricsText: { color: COLORS.primary, fontWeight: '800', fontSize: 12 },
+  queueSection: { marginTop: 9, marginBottom: 3 }, queueTitle: { color: '#252B33', fontWeight: '900', fontSize: 14, marginBottom: 8 }, queueRow: { flexDirection: 'row', gap: 8, paddingBottom: 3 }, queueChip: { minWidth: 78, minHeight: 48, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E8E4DE', alignItems: 'center', justifyContent: 'center' }, queueChipOverdue: { backgroundColor: '#FCEBE8', borderColor: '#E8B5AC' }, queueLabel: { color: '#6B7279', fontSize: 10, fontWeight: '700' }, queueCount: { color: '#252B33', fontSize: 14, fontWeight: '900', marginTop: 1 }, queueOverdueText: { color: '#A83329' },
+  kitchenLoadCard: { backgroundColor: '#FFF', borderColor: '#E8E4DE', borderWidth: 1, borderRadius: 12, minHeight: 64, padding: 13, marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }, kitchenLoadTitle: { color: '#252B33', fontSize: 14, fontWeight: '900' }, kitchenLoadDetail: { color: '#7B8188', fontSize: 12, marginTop: 3 }, kitchenStatus: { minHeight: 40, minWidth: 82, paddingHorizontal: 11, alignItems: 'center', justifyContent: 'center', borderRadius: 10 }, kitchenNormal: { backgroundColor: '#E8F4EB' }, kitchenBusy: { backgroundColor: '#FFF3D8' }, kitchenVeryBusy: { backgroundColor: '#FCEBE8' }, kitchenStatusText: { color: '#343A40', fontSize: 12, fontWeight: '900' },
+  pickupQuickAction: { backgroundColor: '#fff', borderColor: '#F1D2C5', borderWidth: 1, borderRadius: 12, minHeight: 64, padding: 13, marginTop: 17, flexDirection: 'row', alignItems: 'center', gap: 12 }, pickupIcon: { width: 38, height: 38, backgroundColor: '#FFF0EB', borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, pickupTitle: { color: '#252B33', fontSize: 14, fontWeight: '900' }, pickupSubtitle: { color: '#7B8188', fontSize: 11, marginTop: 3 },
+  container: { flex: 1, backgroundColor: '#F6F4F1' }, content: { padding: 16, paddingBottom: 28, maxWidth: 1120, width: '100%', alignSelf: 'center' },
+  pageIntro: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 4, marginBottom: 13 }, eyebrow: { color: '#8A776A', fontSize: 10, fontWeight: '800', letterSpacing: 1.2 }, pageTitle: { fontSize: 23, fontWeight: '900', color: '#242A32', marginTop: 4 },
   acceptChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 9 }, acceptOn: { backgroundColor: '#E6F4E9' }, acceptOff: { backgroundColor: '#FCEBE8' }, dot: { width: 8, height: 8, borderRadius: 4 }, dotOn: { backgroundColor: '#258344' }, dotOff: { backgroundColor: '#C33B2C' }, acceptText: { fontSize: 12, fontWeight: '800', color: '#343A40' },
   periodRow: { flexDirection: 'row', gap: 8, marginBottom: 14 }, periodChip: { paddingVertical: 8, paddingHorizontal: 13, borderRadius: 8, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E1DC' }, periodSelected: { backgroundColor: '#282D33', borderColor: '#282D33' }, periodText: { color: '#626971', fontSize: 12, fontWeight: '700' }, periodTextSelected: { color: '#fff' },
-  revenuePanel: { backgroundColor: '#302F2D', padding: 20, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 13 }, revenueCaption: { color: '#F4B29D', fontSize: 10, fontWeight: '800', letterSpacing: 1 }, revenueAmount: { color: '#fff', fontSize: 30, fontWeight: '900', marginTop: 4 }, revenueSub: { color: '#D1D0CE', fontSize: 12, marginTop: 4 },
+  revenuePanel: { backgroundColor: '#302F2D', padding: 16, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 11 }, revenueCaption: { color: '#F4B29D', fontSize: 10, fontWeight: '800', letterSpacing: 1 }, revenueAmount: { color: '#fff', fontSize: 25, fontWeight: '900', marginTop: 4 }, revenueSub: { color: '#D1D0CE', fontSize: 12, marginTop: 4 },
   metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, metricCard: { backgroundColor: '#fff', borderColor: '#E8E4DE', borderWidth: 1, borderRadius: 10, padding: 14, flexGrow: 1, flexBasis: 145, minWidth: 135 }, metricTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, iconBox: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }, metricValue: { color: '#252B33', fontWeight: '900', fontSize: 22 }, metricLabel: { color: '#3E444B', fontWeight: '800', fontSize: 12, marginTop: 11 }, metricDetail: { color: '#838991', fontSize: 11, marginTop: 3 },
-  section: { backgroundColor: '#fff', borderColor: '#E8E4DE', borderWidth: 1, borderRadius: 10, padding: 16, marginTop: 13 }, sectionTitle: { color: '#252B33', fontSize: 15, fontWeight: '900', marginBottom: 12 }, paymentRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0EEEB' }, paymentLabel: { color: '#666C73', fontSize: 13 }, paymentValue: { color: '#252B33', fontSize: 13, fontWeight: '800' }, trendRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 5 }, trendLabel: { width: 48, color: '#7D838A', fontSize: 10 }, barTrack: { flex: 1, height: 8, backgroundColor: '#F1EEEA', borderRadius: 5, overflow: 'hidden' }, bar: { height: 8, backgroundColor: COLORS.primary, borderRadius: 5 }, trendValue: { width: 70, textAlign: 'right', color: '#42484F', fontSize: 10, fontWeight: '700' }, itemRank: { width: 22, color: '#9A6654', fontSize: 12, fontWeight: '900' }, itemName: { color: '#4B5259', fontSize: 12, flex: 1 }, alertRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, borderTopWidth: 1, borderTopColor: '#F0EEEB' }, alertMark: { color: '#AE3D31', backgroundColor: '#FCEBE8', fontWeight: '900', textAlign: 'center', width: 20, height: 20, borderRadius: 10, overflow: 'hidden', lineHeight: 20 }, alertMarkAmber: { color: '#8A5A0E', backgroundColor: '#FFF2D7', fontWeight: '900', textAlign: 'center', width: 20, height: 20, borderRadius: 10, overflow: 'hidden', lineHeight: 20 }, alertText: { color: '#565D64', fontSize: 12, flex: 1 }, orderRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderTopWidth: 1, borderTopColor: '#F0EEEB', gap: 12 }, orderTitle: { color: '#343A41', fontSize: 13, fontWeight: '800' }, orderMeta: { color: '#80868D', fontSize: 11, marginTop: 4 }, orderAmount: { color: '#30353B', fontWeight: '800', fontSize: 13 }, muted: { color: '#858A90', fontSize: 12 }, sectionHeading: { color: '#252B33', fontSize: 17, fontWeight: '900', marginTop: 24, marginBottom: 10 }, actionRow: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#E8E4DE', borderRadius: 10, padding: 13, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12 }, actionIcon: { width: 38, height: 38, backgroundColor: '#FFF0EB', borderRadius: 8, alignItems: 'center', justifyContent: 'center' }, actionTitle: { color: '#2D333B', fontSize: 13, fontWeight: '800' }, actionSub: { color: '#7B8188', fontSize: 11, marginTop: 3 }, logout: { padding: 14, alignItems: 'center' }, logoutText: { color: '#A83930', fontSize: 13, fontWeight: '800' }, errorBox: { backgroundColor: '#FCEBE8', borderColor: '#F0C5BF', borderWidth: 1, padding: 12, borderRadius: 9, marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, errorText: { color: '#9B3328', fontSize: 12, flex: 1 }, retry: { color: '#9B3328', fontWeight: '900', fontSize: 12 },
+  section: { backgroundColor: '#fff', borderColor: '#E8E4DE', borderWidth: 1, borderRadius: 10, padding: 14, marginTop: 11 }, sectionTitle: { color: '#252B33', fontSize: 15, fontWeight: '900', marginBottom: 10 }, paymentRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0EEEB' }, paymentLabel: { color: '#666C73', fontSize: 13 }, paymentValue: { color: '#252B33', fontSize: 13, fontWeight: '800' }, trendRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 5 }, trendLabel: { width: 48, color: '#7D838A', fontSize: 10 }, barTrack: { flex: 1, height: 8, backgroundColor: '#F1EEEA', borderRadius: 5, overflow: 'hidden' }, bar: { height: 8, backgroundColor: COLORS.primary, borderRadius: 5 }, trendValue: { width: 70, textAlign: 'right', color: '#42484F', fontSize: 10, fontWeight: '700' }, itemRank: { width: 22, color: '#9A6654', fontSize: 12, fontWeight: '900' }, itemName: { color: '#4B5259', fontSize: 12, flex: 1 }, alertRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, borderTopWidth: 1, borderTopColor: '#F0EEEB' }, alertMark: { color: '#AE3D31', backgroundColor: '#FCEBE8', fontWeight: '900', textAlign: 'center', width: 20, height: 20, borderRadius: 10, overflow: 'hidden', lineHeight: 20 }, alertMarkAmber: { color: '#8A5A0E', backgroundColor: '#FFF2D7', fontWeight: '900', textAlign: 'center', width: 20, height: 20, borderRadius: 10, overflow: 'hidden', lineHeight: 20 }, alertText: { color: '#565D64', fontSize: 12, flex: 1 }, orderRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderTopWidth: 1, borderTopColor: '#F0EEEB', gap: 12 }, orderTitle: { color: '#343A41', fontSize: 13, fontWeight: '800' }, orderMeta: { color: '#80868D', fontSize: 11, marginTop: 4 }, orderAmount: { color: '#30353B', fontWeight: '800', fontSize: 13 }, muted: { color: '#858A90', fontSize: 12 }, sectionHeading: { color: '#252B33', fontSize: 17, fontWeight: '900', marginTop: 18, marginBottom: 9 }, actionRow: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#E8E4DE', borderRadius: 10, padding: 12, marginBottom: 7, flexDirection: 'row', alignItems: 'center', gap: 12 }, actionIcon: { width: 38, height: 38, backgroundColor: '#FFF0EB', borderRadius: 8, alignItems: 'center', justifyContent: 'center' }, actionTitle: { color: '#2D333B', fontSize: 13, fontWeight: '800' }, actionSub: { color: '#7B8188', fontSize: 11, marginTop: 3 }, logout: { padding: 14, alignItems: 'center' }, logoutText: { color: '#A83930', fontSize: 13, fontWeight: '800' }, errorBox: { backgroundColor: '#FCEBE8', borderColor: '#F0C5BF', borderWidth: 1, padding: 12, borderRadius: 9, marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, errorText: { color: '#9B3328', fontSize: 12, flex: 1 }, retry: { color: '#9B3328', fontWeight: '900', fontSize: 12 },
 });

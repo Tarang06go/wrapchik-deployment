@@ -11,6 +11,7 @@
     "db:loyalty-indexes": "node src/scripts/ensureLoyaltyIndexes.js",
     "db:audit-menu": "node src/scripts/auditMenu.js --dry-run",
     "db:import-menu": "node src/scripts/importScreenshotMenu.js",
+    "db:seed-demo": "node src/scripts/seedDemoDatabase.js",
     "db:backup": "node src/scripts/backupDatabase.js",
     "db:restore": "node src/scripts/restoreDatabase.js",
     "admin:recover": "node src/scripts/recoverAdmin.js",

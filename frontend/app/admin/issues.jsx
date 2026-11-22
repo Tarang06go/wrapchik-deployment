@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, FlatList, RefreshControl, Text, TouchableOpacity, Alert, TextInput, Modal, ScrollView } from 'react-native';
+import { View, StyleSheet, FlatList, RefreshControl, Text, TouchableOpacity, Alert, TextInput, Modal, ScrollView, Platform } from 'react-native';
 import { AlertTriangle, CheckCircle2, MessageSquare } from 'lucide-react-native';
 import Header from '../../components/common/Header';
 import Button from '../../components/common/Button';
-import LoadingIndicator from '../../components/common/LoadingIndicator';
 import EmptyState from '../../components/common/EmptyState';
 import api from '../../services/api';
 import COLORS from '../../constants/colors';
+import { AdminLoadingState } from '../../components/admin/AdminPrimitives';
+import { showPlatformAlert } from '../../utils/platformDialogs';
 
-const notify = (title, text) => typeof window !== 'undefined' ? window.alert(`${title}\n\n${text}`) : Alert.alert(title, text);
+const notify = (title, text) => showPlatformAlert(Platform.OS, title, text, { nativeAlert: (...args) => Alert.alert(...args) });
 
 export default function AdminIssuesScreen() {
   const [issues, setIssues] = useState([]);
@@ -56,7 +57,7 @@ export default function AdminIssuesScreen() {
   const openCount = issues.filter(i => i.status !== 'RESOLVED').length;
   const resolvedCount = issues.filter(i => i.status === 'RESOLVED').length;
 
-  if (loading) return <LoadingIndicator message="Loading reported issues…" />;
+  if (loading) return <AdminLoadingState message="Loading reported issues…" />;
 
   return (
     <View style={styles.container}>
