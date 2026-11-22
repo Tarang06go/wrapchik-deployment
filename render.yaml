@@ -48,6 +48,10 @@ services:
         sync: false
       - key: EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
         sync: false
+    headers:
+      - path: /manifest.webmanifest
+        name: Content-Type
+        value: application/manifest+json
     routes:
       - type: rewrite
         source: /*
