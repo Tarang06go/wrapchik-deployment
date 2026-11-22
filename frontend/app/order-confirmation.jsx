@@ -209,6 +209,11 @@ export default function OrderConfirmationScreen() {
             {order.taxAndFees != null ? <View style={styles.detailRow}><Text style={styles.label}>Taxes & fees</Text><Text style={styles.detailValue}>₹{order.taxAndFees}</Text></View> : null}
             <View style={styles.totalRow}><Text style={styles.totalLabel}>Order total</Text><Text style={styles.totalValue}>₹{order.totalAmount}</Text></View>
             <View style={styles.detailRow}><Text style={styles.label}>Payment</Text><Text style={styles.detailValue}>{order.paymentMethod === 'CASHFREE' ? 'Legacy Cashfree' : order.paymentMethod === 'RAZORPAY' ? 'Legacy Razorpay' : order.paymentMethod === 'UPI_QR' ? 'UPI QR' : 'Cash at counter'}</Text></View>
+            {order.paymentStatus === 'SUCCESS' && order.paymentMethod === 'UPI_QR' && order.paymentId?.upiTransactionReference ? <View style={styles.verifiedPaymentCard}>
+              <Text style={styles.verifiedPaymentTitle}>Payment verified by the outlet</Text>
+              <Text style={styles.label}>UPI transaction reference</Text>
+              <Text selectable style={styles.verifiedPaymentReference}>{order.paymentId.upiTransactionReference}</Text>
+            </View> : null}
             {order.orderType === 'TAKEAWAY' ? <View style={styles.location}><MapPin size={16} color={COLORS.primary} /><View style={styles.itemCopy}><Text style={styles.locationTitle}>Pickup</Text><Text style={styles.locationText}>{order.pickupLocation || 'Wrapchik SAC Counter'}</Text>{order.pickupTimeSlot ? <Text style={styles.locationText}>Time: {order.pickupTimeSlot}</Text> : null}</View></View> : null}
             {order.orderType === 'DELIVERY' ? <View style={styles.location}><MapPin size={16} color={COLORS.primary} /><View style={styles.itemCopy}><Text style={styles.locationTitle}>Delivery</Text><Text style={styles.locationText}>{[order.hostel, order.roomNumber].filter(Boolean).join(' · ')}</Text></View></View> : null}
             {order.orderType === 'DINE_IN' && order.tableId ? <View style={styles.location}><MapPin size={16} color={COLORS.primary} /><Text style={styles.locationText}>Dine-in at your selected table</Text></View> : null}
@@ -274,6 +279,9 @@ const styles = StyleSheet.create({
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   totalLabel: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }, totalValue: { color: COLORS.primary, fontSize: 19, fontWeight: '900' },
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }, detailValue: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '700' }, discountValue: { color: COLORS.success, fontSize: 13, fontWeight: '800' },
+  verifiedPaymentCard: { backgroundColor: COLORS.successLight, borderRadius: 12, padding: 12, marginBottom: 12 },
+  verifiedPaymentTitle: { color: COLORS.success, fontSize: 13, fontWeight: '900', marginBottom: 6 },
+  verifiedPaymentReference: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '800', marginTop: 3 },
   location: { flexDirection: 'row', gap: 9, padding: 12, borderRadius: 15, backgroundColor: COLORS.primaryLight, marginBottom: 12 },
   locationTitle: { color: COLORS.textPrimary, fontSize: 12, fontWeight: '800', marginBottom: 2 }, locationText: { color: COLORS.textSecondary, fontSize: 12, lineHeight: 17 },
   prep: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 16 }, prepText: { color: COLORS.textSecondary, fontSize: 12 },

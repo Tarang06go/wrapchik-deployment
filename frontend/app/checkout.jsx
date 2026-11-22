@@ -1,5 +1,5 @@
 import React, { useState, useContext, useEffect, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Platform, Linking, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable, TextInput, ActivityIndicator, Platform, Linking, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MapPin, Clock, CreditCard, ShieldCheck, Gift } from 'lucide-react-native';
 import { CartContext } from '../context/CartContext';
@@ -24,6 +24,7 @@ import { safeBack } from '../utils/navigation';
 import { successHaptic } from '../utils/haptics';
 import { outletDirectionsUrl } from '../utils/outletDirections';
 import { getConfiguredPickupPoint } from '../utils/configuredPickupPoint';
+import { isUpiCheckoutAvailable, reconcileCheckoutMethod, selectCheckoutMethod } from '../utils/paymentClientLogic.mjs';
 
 
 
@@ -75,6 +76,7 @@ export default function CheckoutScreen() {
   const recommendedPickupSlot = useMemo(() => getRecommendedPickupSlot(pickupSlots), [pickupSlots]);
   const idempotencyKeyRef = useRef('');
   const preparedFingerprintRef = useRef('');
+  const placeOrderInFlightRef = useRef(false);
   const intentFingerprint = useMemo(() => {
     const intent = JSON.stringify({
       userId: user?._id,
@@ -142,10 +144,8 @@ export default function CheckoutScreen() {
 
   useEffect(() => {
     if (!settings) return;
-    if (settings.cashEnabled === false && settings.upiEnabled === true) setPaymentMethod('UPI_QR');
-    else if (settings.cashEnabled === false && settings.upiEnabled !== true) setPaymentMethod('');
-    else if (!paymentMethod) setPaymentMethod('COUNTER');
-  }, [settings?.cashEnabled, settings?.upiEnabled]);
+    setPaymentMethod(current => reconcileCheckoutMethod(current, settings));
+  }, [settings?.cashEnabled, settings?.upiEnabled, settings?.upiId, settings?.upiPayeeName]);
 
   useEffect(() => {
     if (orderType !== 'TAKEAWAY' || !settings?.scheduledPickupEnabled) { setPickupSlots([]); setScheduledPickupAt(''); setPickupMode('IMMEDIATE'); return; }
@@ -288,7 +288,7 @@ export default function CheckoutScreen() {
   };
 
   const handlePlaceOrder = async () => {
-    if (loading || !idempotencyReady || preparedFingerprintRef.current !== intentFingerprint || !cartItems.length || !settings?.acceptingOrders) return;
+    if (loading || placeOrderInFlightRef.current || !idempotencyReady || preparedFingerprintRef.current !== intentFingerprint || !cartItems.length || !settings?.acceptingOrders) return;
     if (!user) {
       router.push({ pathname: '/(auth)/login', params: { returnTo: 'checkout' } });
       return;
@@ -297,6 +297,7 @@ export default function CheckoutScreen() {
       setValidationError('Apply or recheck your reward points before placing the order.');
       return;
     }
+    placeOrderInFlightRef.current = true;
     try {
       setLoading(true);
       setSubmissionError('');
@@ -371,6 +372,7 @@ export default function CheckoutScreen() {
     } catch (error) {
       setSubmissionError(error.message || 'Order creation failed. Your cart is unchanged.');
     } finally {
+      placeOrderInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -580,27 +582,32 @@ export default function CheckoutScreen() {
 
                 <Text style={styles.sectionTitle}>Payment Method</Text>
                 <View style={styles.paymentMethods}>
-                  {settings?.cashEnabled !== false ? <TouchableOpacity 
+                  {settings?.cashEnabled !== false ? <Pressable
                     style={[styles.paymentCard, paymentMethod === 'COUNTER' && styles.paymentCardSelected]}
-                    onPress={() => setPaymentMethod('COUNTER')}
+                    onPress={() => setPaymentMethod(current => selectCheckoutMethod(current, 'COUNTER', settings))}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: paymentMethod === 'COUNTER' }}
+                    android_ripple={{ color: '#FFE4D8' }}
                   >
                     <ShieldCheck size={24} color={paymentMethod === 'COUNTER' ? COLORS.primary : COLORS.textSecondary} />
                     <Text style={[styles.paymentText, paymentMethod === 'COUNTER' && styles.paymentTextSelected]}>Cash at Counter</Text>
-                  </TouchableOpacity> : null}
+                  </Pressable> : null}
                   
-                  {settings?.upiEnabled === true && !!settings?.upiId && !!settings?.upiPayeeName ? <TouchableOpacity
+                  {isUpiCheckoutAvailable(settings) ? <Pressable
                     style={[styles.paymentCard, paymentMethod === 'UPI_QR' && styles.paymentCardSelected]}
-                    onPress={() => setPaymentMethod('UPI_QR')}
+                    onPress={() => setPaymentMethod(current => selectCheckoutMethod(current, 'UPI_QR', settings))}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: paymentMethod === 'UPI_QR' }}
+                    android_ripple={{ color: '#FFE4D8' }}
                   >
                     <CreditCard size={24} color={paymentMethod === 'UPI_QR' ? COLORS.primary : COLORS.textSecondary} />
                     <Text style={[styles.paymentText, paymentMethod === 'UPI_QR' && styles.paymentTextSelected]}>UPI QR</Text>
-                  </TouchableOpacity> : null}
+                  </Pressable> : null}
                 </View>
-                {settings?.cashEnabled === false && settings?.upiEnabled !== true ? <Text style={styles.pricingNote}>The outlet has not enabled a payment method yet. Please try again later.</Text> : null}
+                {settings?.upiEnabled === true && !isUpiCheckoutAvailable(settings) ? <Text style={styles.pricingNote}>UPI is temporarily unavailable because the outlet payment details are incomplete.</Text> : null}
+                {settings?.cashEnabled === false ? <Text style={styles.pricingNote}>Cash at the counter is currently disabled by the outlet.</Text> : null}
+                {settings?.upiEnabled === false ? <Text style={styles.pricingNote}>UPI is currently disabled by the outlet.</Text> : null}
+                {settings?.cashEnabled === false && !isUpiCheckoutAvailable(settings) ? <Text style={styles.pricingNote}>No payment method is available right now. Please try again later.</Text> : null}
                 {paymentMethod === 'COUNTER' && settings?.cashEnabled !== false ? <Text style={styles.pricingNote}>Pay cash at the Wrapchik counter when you collect your order.</Text> : null}
                 {paymentMethod === 'UPI_QR' ? <Text style={styles.pricingNote}>Scan the order QR or open a compatible UPI app. The outlet verifies payment manually.</Text> : null}
                 {submissionError ? <View style={styles.validationBanner} accessibilityRole="alert"><Text style={styles.validationText}>{submissionError}</Text></View> : null}
@@ -628,7 +635,7 @@ export default function CheckoutScreen() {
             />
           ) : (
             <Button
-            title={user ? paymentMethod === 'COUNTER' ? `Place Order (₹${displayTotal})` : `Continue to UPI (₹${displayTotal})` : 'Sign in to place order'}
+            title={!idempotencyReady || preparedFingerprintRef.current !== intentFingerprint ? 'Preparing secure checkout…' : user ? paymentMethod === 'COUNTER' ? `Place Order (₹${displayTotal})` : `Continue to UPI (₹${displayTotal})` : 'Sign in to place order'}
               onPress={handlePlaceOrder}
               disabled={!cartItems.length || !settings?.acceptingOrders || !idempotencyReady || (step === 3 && !paymentMethod) || preparedFingerprintRef.current !== intentFingerprint}
               loading={loading}

@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const payment = fs.readFileSync(new URL('../app/payment.jsx', import.meta.url), 'utf8');
+const paymentLogic = fs.readFileSync(new URL('../utils/paymentClientLogic.mjs', import.meta.url), 'utf8');
 
 test('UPI launch uses backend instructions and does not set payment success locally', () => {
   assert.match(payment, /paymentService\.getUpiInstructions\(orderId\)/);
-  assert.match(payment, /await Linking\.openURL\(instructions\.upiUri\)/);
+  assert.match(payment, /launchUpiPayment\(\{[\s\S]*?uri: instructions\.upiUri/);
+  assert.match(paymentLogic, /await linking\.openURL\(uri\)/);
   assert.match(payment, /currentOrder\.paymentStatus === 'SUCCESS'/);
   assert.doesNotMatch(payment, /paymentStatus\s*=\s*['"]SUCCESS['"]/);
+  assert.doesNotMatch(payment, /autoLaunchAttemptedUri/);
 });
 
 test('UPI app launch failures preserve the QR and manual-verification fallback', () => {
@@ -24,4 +27,6 @@ test('UPI fallback copies the backend order link and blocks overlapping launch/r
   assert.match(payment, /upiLaunchInFlight\.current/);
   assert.match(payment, /referenceSubmitInFlight\.current/);
   assert.match(payment, /Copy order-specific UPI link/);
+  assert.match(payment, /const current = await refresh\(\)/);
+  assert.match(payment, /Do not pay again if the transfer succeeded/);
 });
